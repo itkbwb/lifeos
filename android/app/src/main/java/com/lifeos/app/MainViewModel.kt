@@ -1,0 +1,75 @@
+package com.lifeos.app
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.lifeos.app.data.Dashboard
+import com.lifeos.app.data.ApiFactory
+import com.lifeos.app.data.SettingsStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+sealed class LoadState {
+    data object Loading : LoadState()
+    data class Loaded(val dashboard: Dashboard) : LoadState()
+    data class Error(val message: String) : LoadState()
+}
+
+class MainViewModel(application: Application) : AndroidViewModel(application) {
+    private val settingsStore = SettingsStore(application)
+
+    private val _state = MutableStateFlow<LoadState>(LoadState.Loading)
+    val state: StateFlow<LoadState> = _state
+
+    private val _serverUrl = MutableStateFlow(SettingsStore.DEFAULT_URL)
+    val serverUrl: StateFlow<String> = _serverUrl
+
+    init {
+        viewModelScope.launch {
+            settingsStore.serverUrl.collect { url ->
+                _serverUrl.value = url
+                refresh()
+            }
+        }
+    }
+
+    fun refresh() {
+        viewModelScope.launch {
+            _state.value = LoadState.Loading
+            try {
+                val url = settingsStore.serverUrl.first()
+                val dashboard = withContext(Dispatchers.IO) {
+                    ApiFactory.create(url).getDashboard()
+                }
+                _state.value = LoadState.Loaded(dashboard)
+            } catch (e: Exception) {
+                _state.value = LoadState.Error(e.message ?: "Network error")
+            }
+        }
+    }
+
+    fun completeBlock(id: Int) = act(id, "completed")
+    fun skipBlock(id: Int) = act(id, "skipped")
+
+    private fun act(id: Int, action: String) {
+        viewModelScope.launch {
+            try {
+                val url = settingsStore.serverUrl.first()
+                withContext(Dispatchers.IO) {
+                    ApiFactory.create(url).blockAction(id, action)
+                }
+                refresh()
+            } catch (_: Exception) {
+                // Next manual refresh will retry; nothing to reconcile locally.
+            }
+        }
+    }
+
+    fun updateServerUrl(url: String) {
+        viewModelScope.launch { settingsStore.setServerUrl(url) }
+    }
+}
