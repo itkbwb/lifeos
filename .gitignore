@@ -1,0 +1,27 @@
+# Python / server
+server/.venv/
+server/__pycache__/
+server/app/__pycache__/
+**/__pycache__/
+*.pyc
+server/uvicorn.*.log
+server/backups/
+
+# Real user data - never commit the live database
+server/data/*.db
+server/data/*.db-journal
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/*/build/
+android/local.properties
+android/.idea/
+android/*.iml
+android/captures/
+*.apk
+*.aab
+
+# OS
+.DS_Store
+Thumbs.db

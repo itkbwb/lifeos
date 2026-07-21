@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#09080d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/icon.svg">
+  <link rel="stylesheet" href="/static/app.css?v={{ version }}">
+  <title>Life OS</title>
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <header class="app-header">
+    <a class="brand" href="#now" aria-label="Life OS">
+      <span class="brand-mark">L</span>
+      <span class="brand-copy">
+        <strong>Life OS</strong>
+        <small>Mission Control</small>
+      </span>
+    </a>
+
+    <div class="header-actions">
+      <button class="icon-button hidden" id="install-button" type="button" title="Установить">
+        <span>↓</span>
+      </button>
+      <span class="connection-dot" id="connection-dot" title="Статус соединения"></span>
+    </div>
+  </header>
+
+  <nav class="section-rail" aria-label="Разделы">
+    <a href="#now" class="rail-link active">Сейчас</a>
+    <a href="#day" class="rail-link">День</a>
+    <a href="#week" class="rail-link">Неделя</a>
+    <a href="#projects" class="rail-link">Проекты</a>
+  </nav>
+
+  <main class="app-shell">
+    <section class="screen now-screen" id="now">
+      <div class="screen-heading">
+        <div>
+          <p class="eyebrow" id="today-label">СЕГОДНЯ</p>
+          <h1 id="clock">00:00</h1>
+        </div>
+        <div class="countdown-chip">
+          <span id="days-to-plan">0</span>
+          <small>дней до 15 августа</small>
+        </div>
+      </div>
+
+      <article class="mission-card" id="mission-card">
+        <div class="mission-topline">
+          <span class="status-pill" id="mission-status">ТЕКУЩИЙ БЛОК</span>
+          <span class="mission-window" id="mission-window">00:00 • 00:00</span>
+        </div>
+
+        <div class="mission-center">
+          <div class="progress-orbit" id="progress-orbit">
+            <div class="progress-orbit-inner">
+              <span class="timer-label">ОСТАЛОСЬ</span>
+              <strong class="mission-timer" id="mission-timer">00:00:00</strong>
+            </div>
+          </div>
+
+          <div class="mission-copy">
+            <p class="mission-project" id="mission-project">LIFE OS</p>
+            <h2 id="mission-title">Определяем план</h2>
+            <p id="mission-notes">Синхронизация с сервером</p>
+          </div>
+        </div>
+
+        <div class="mission-actions">
+          <button class="button button-primary" id="complete-button" type="button">
+            Завершить блок
+          </button>
+          <button class="button button-ghost" id="skip-button" type="button">
+            Пропустить
+          </button>
+        </div>
+      </article>
+
+      <article class="next-card">
+        <div>
+          <p class="eyebrow">ДАЛЬШЕ</p>
+          <h3 id="next-title">План завершен</h3>
+        </div>
+        <div class="next-time" id="next-time">•</div>
+      </article>
+
+      <article class="day-score-card">
+        <div class="score-header">
+          <div>
+            <p class="eyebrow">ДЕНЬ</p>
+            <h3>Выполнение</h3>
+          </div>
+          <strong id="day-score">0%</strong>
+        </div>
+        <div class="score-track">
+          <div class="score-fill" id="day-score-fill"></div>
+        </div>
+        <div class="score-stats">
+          <span><b id="completed-count">0</b> завершено</span>
+          <span><b id="remaining-count">0</b> осталось</span>
+          <span><b id="work-hours">0</b> ч работы</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="screen" id="day">
+      <div class="section-header">
+        <div>
+          <p class="eyebrow">ПЛАН ДНЯ</p>
+          <h2>Сегодня</h2>
+        </div>
+        <button class="button button-small" id="add-block-button" type="button">Добавить</button>
+      </div>
+
+      <div class="timeline" id="timeline"></div>
+    </section>
+
+    <section class="screen" id="week">
+      <div class="section-header">
+        <div>
+          <p class="eyebrow">НАГРУЗКА</p>
+          <h2>Неделя</h2>
+        </div>
+        <div class="week-total" id="week-total">0 ч</div>
+      </div>
+
+      <div class="week-grid" id="week-grid"></div>
+    </section>
+
+    <section class="screen" id="projects">
+      <div class="section-header">
+        <div>
+          <p class="eyebrow">МИССИИ</p>
+          <h2>Проекты</h2>
+        </div>
+      </div>
+
+      <div class="project-list" id="project-list"></div>
+    </section>
+
+    <footer class="app-footer">
+      <span>Life OS v{{ version }}</span>
+      <span>Данные хранятся на сервере</span>
+    </footer>
+  </main>
+
+  <dialog class="sheet" id="block-dialog">
+    <form id="block-form">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow" id="dialog-eyebrow">БЛОК</p>
+          <h3 id="dialog-title">Новый блок</h3>
+        </div>
+        <button class="icon-button" id="close-dialog-button" type="button">×</button>
+      </div>
+
+      <input type="hidden" id="block-id">
+
+      <label class="field">
+        <span>Название</span>
+        <input id="block-title" maxlength="180" required>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span>Дата</span>
+          <input type="date" id="block-date" required>
+        </label>
+        <label class="field">
+          <span>Тип</span>
+          <select id="block-type">
+            <option value="work">Работа</option>
+            <option value="routine">Рутина</option>
+            <option value="meal">Еда</option>
+            <option value="health">Здоровье</option>
+            <option value="travel">Дорога</option>
+            <option value="life">Быт</option>
+            <option value="recovery">Восстановление</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="field-row">
+        <label class="field">
+          <span>Начало</span>
+          <input type="time" id="block-start" required>
+        </label>
+        <label class="field">
+          <span>Конец</span>
+          <input type="time" id="block-end" required>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Проект</span>
+        <select id="block-project">
+          <option value="">Без проекта</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Заметка</span>
+        <textarea id="block-notes" rows="3"></textarea>
+      </label>
+
+      <div class="sheet-actions">
+        <button class="button button-danger hidden" id="delete-block-button" type="button">Удалить</button>
+        <button class="button button-primary" id="save-block-button" type="submit">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script>
+    window.LIFEOS_BOOTSTRAP = {
+      version: {{ version | tojson }},
+      today: {{ today | tojson }},
+      planEndDate: {{ plan_end_date | tojson }},
+      blocks: {{ blocks | tojson }},
+      week: {{ week | tojson }},
+      projectStats: {{ project_stats | tojson }},
+      projects: {{ projects | tojson }}
+    };
+  </script>
+  <script src="/static/app.js?v={{ version }}"></script>
+</body>
+</html>
