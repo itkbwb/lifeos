@@ -1,104 +1,104 @@
 package com.lifeos.app.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Card
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.lifeos.app.data.Block
-import com.lifeos.app.data.Dashboard
+import com.lifeos.app.data.DayDeviation
 import kotlinx.coroutines.delay
-import java.time.Duration
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
-
-private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-
-private fun parseTime(s: String): LocalTime = LocalTime.parse(s)
-
-private fun currentAndNext(blocks: List<Block>, now: LocalTime): Pair<Block?, Block?> {
-    val sorted = blocks.sortedBy { it.start_time }
-    val current = sorted.firstOrNull { b ->
-        val start = parseTime(b.start_time)
-        val end = parseTime(b.end_time)
-        !now.isBefore(start) && now.isBefore(end)
-    }
-    val next = sorted.firstOrNull { parseTime(it.start_time).isAfter(now) }
-    return current to next
-}
 
 @Composable
 fun NowScreen(
-    dashboard: Dashboard,
+    state: NowUiState,
+    dayDeviation: DayDeviation,
+    fetchedAtMillis: Long,
+    onStart: (Int) -> Unit,
+    onPause: (Int) -> Unit,
+    onResume: (Int) -> Unit,
     onComplete: (Int) -> Unit,
     onSkip: (Int) -> Unit,
+    onReschedule: (Int) -> Unit,
 ) {
-    var now by remember { mutableStateOf(LocalTime.now()) }
-    LaunchedEffect(Unit) {
+    var tickMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state) {
         while (true) {
-            now = LocalTime.now()
             delay(1000)
+            tickMillis = System.currentTimeMillis()
         }
     }
-
-    val (current, next) = remember(dashboard, now) { currentAndNext(dashboard.blocks, now) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(text = now.format(timeFormatter), fontSize = 40.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(24.dp))
-
-        if (current != null) {
-            val remainingSeconds = Duration.between(now, parseTime(current.end_time))
-                .seconds
-                .coerceAtLeast(0)
-            val hh = remainingSeconds / 3600
-            val mm = (remainingSeconds % 3600) / 60
-            val ss = remainingSeconds % 60
-
-            Text(text = (current.project_name ?: "LIFE OS").uppercase(), fontSize = 13.sp)
-            Text(text = current.title, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        if (dayDeviation.minutes_over_under_planned != 0) {
+            DeviationBanner(dayDeviation)
             Spacer(Modifier.height(16.dp))
-            Text(
-                text = "%02d:%02d:%02d".format(hh, mm, ss),
-                fontSize = 48.sp,
-                fontWeight = FontWeight.Bold,
+        }
+
+        when (state) {
+            is NowUiState.Ready -> ReadyCard(
+                block = state.block,
+                minutesLate = state.minutesLate,
+                onStart = { onStart(state.block.id) },
+                onReschedule = { onReschedule(state.block.id) },
+                onSkip = { onSkip(state.block.id) },
             )
-            Spacer(Modifier.height(24.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { onComplete(current.id) }) { Text("Завершить блок") }
-                OutlinedButton(onClick = { onSkip(current.id) }) { Text("Пропустить") }
+
+            is NowUiState.Active -> {
+                val elapsedNow = state.session.elapsed_seconds +
+                    ((tickMillis - fetchedAtMillis) / 1000).toInt().coerceAtLeast(0)
+                ActiveCard(
+                    block = state.block,
+                    elapsedSeconds = elapsedNow,
+                    plannedSeconds = state.block.planned_duration_minutes * 60,
+                    onPause = { onPause(state.block.id) },
+                    onComplete = { onComplete(state.block.id) },
+                )
             }
-        } else {
-            Text("Сейчас нет активного блока", fontSize = 18.sp)
-        }
 
-        Spacer(Modifier.height(32.dp))
+            is NowUiState.Paused -> PausedCard(
+                block = state.block,
+                pausedSeconds = state.session.elapsed_seconds,
+                onResume = { onResume(state.block.id) },
+            )
 
-        if (next != null) {
-            Text("Дальше: ${next.title} в ${next.start_time}", fontSize = 14.sp)
-        } else {
-            Text("План на сегодня завершён", fontSize = 14.sp)
+            is NowUiState.Completed -> CompletedCard(state.block)
+
+            is NowUiState.Idle -> IdleCard(state.nextBlock)
         }
+    }
+}
+
+@Composable
+private fun DeviationBanner(deviation: DayDeviation) {
+    val minutes = deviation.minutes_over_under_planned
+    val text = if (minutes > 0) {
+        "Ты потратил на ${minutes} мин больше плана"
+    } else {
+        "Отставание от плана: ${-minutes} мин"
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(16.dp),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }

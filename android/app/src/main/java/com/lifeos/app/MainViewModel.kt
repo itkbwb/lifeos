@@ -3,26 +3,43 @@ package com.lifeos.app
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.lifeos.app.data.Dashboard
 import com.lifeos.app.data.ApiFactory
+import com.lifeos.app.data.Block
+import com.lifeos.app.data.DayPlan
+import com.lifeos.app.data.LifeOsApi
+import com.lifeos.app.data.NowResponse
+import com.lifeos.app.data.ProjectStat
+import com.lifeos.app.data.RescheduleRequest
 import com.lifeos.app.data.SettingsStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import retrofit2.HttpException
+import java.io.IOException
 
-sealed class LoadState {
-    data object Loading : LoadState()
-    data class Loaded(val dashboard: Dashboard) : LoadState()
-    data class Error(val message: String) : LoadState()
+private const val POLL_INTERVAL_MS = 20_000L
+
+sealed class ConnectionState {
+    data object Loading : ConnectionState()
+    data class Loaded(val now: NowResponse, val fetchedAtMillis: Long) : ConnectionState()
+    data object NoConnection : ConnectionState()
+    data object ServerUnavailable : ConnectionState()
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settingsStore = SettingsStore(application)
 
-    private val _state = MutableStateFlow<LoadState>(LoadState.Loading)
-    val state: StateFlow<LoadState> = _state
+    private val _nowState = MutableStateFlow<ConnectionState>(ConnectionState.Loading)
+    val nowState: StateFlow<ConnectionState> = _nowState
+
+    private val _dayPlan = MutableStateFlow<DayPlan?>(null)
+    val dayPlan: StateFlow<DayPlan?> = _dayPlan
+
+    private val _projects = MutableStateFlow<List<ProjectStat>>(emptyList())
+    val projects: StateFlow<List<ProjectStat>> = _projects
 
     private val _serverUrl = MutableStateFlow(SettingsStore.DEFAULT_URL)
     val serverUrl: StateFlow<String> = _serverUrl
@@ -39,49 +56,97 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             settingsStore.serverUrl.collect { url ->
                 _serverUrl.value = url
-                refresh()
+                refreshNow()
+            }
+        }
+        viewModelScope.launch {
+            while (true) {
+                delay(POLL_INTERVAL_MS)
+                refreshNow(showLoading = false)
             }
         }
     }
 
-    private fun buildApi(): com.lifeos.app.data.LifeOsApi {
-        return ApiFactory.create(_serverUrl.value, accessClientId.value, accessClientSecret.value)
-    }
+    private fun buildApi(): LifeOsApi =
+        ApiFactory.create(_serverUrl.value, accessClientId.value, accessClientSecret.value)
 
-    fun refresh() {
+    fun refreshNow(showLoading: Boolean = true) {
         viewModelScope.launch {
-            _state.value = LoadState.Loading
+            if (showLoading) _nowState.value = ConnectionState.Loading
             try {
-                val dashboard = withContext(Dispatchers.IO) { buildApi().getDashboard() }
-                _state.value = LoadState.Loaded(dashboard)
+                val fetchedAt = System.currentTimeMillis()
+                val now = withContext(Dispatchers.IO) { buildApi().getNow() }
+                _nowState.value = ConnectionState.Loaded(now, fetchedAt)
+            } catch (e: IOException) {
+                _nowState.value = ConnectionState.NoConnection
+            } catch (e: HttpException) {
+                _nowState.value = ConnectionState.ServerUnavailable
             } catch (e: Exception) {
-                _state.value = LoadState.Error(e.message ?: "Network error")
+                _nowState.value = ConnectionState.ServerUnavailable
             }
         }
     }
 
-    fun completeBlock(id: Int) = act(id, "completed")
-    fun skipBlock(id: Int) = act(id, "skipped")
-
-    private fun act(id: Int, action: String) {
+    fun refreshDayPlan(date: String? = null) {
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { buildApi().blockAction(id, action) }
-                refresh()
+                _dayPlan.value = withContext(Dispatchers.IO) { buildApi().getDayPlan(date) }
             } catch (_: Exception) {
-                // Next manual refresh will retry; nothing to reconcile locally.
+                // Day screen keeps showing its last known list; Now screen already
+                // surfaces the connectivity state.
             }
+        }
+    }
+
+    fun refreshProjects() {
+        viewModelScope.launch {
+            try {
+                _projects.value = withContext(Dispatchers.IO) { buildApi().getProjects() }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun act(id: Int, call: suspend LifeOsApi.(Int) -> Block) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { buildApi().call(id) }
+            } catch (_: HttpException) {
+                // 409 = already in that state, or another session is active;
+                // resyncing below shows the real current state either way.
+            } catch (_: Exception) {
+            }
+            refreshNow(showLoading = false)
+            refreshDayPlan()
+        }
+    }
+
+    fun startBlock(id: Int) = act(id) { startBlock(it) }
+    fun pauseBlock(id: Int) = act(id) { pauseBlock(it) }
+    fun resumeBlock(id: Int) = act(id) { resumeBlock(it) }
+    fun completeBlock(id: Int) = act(id) { completeBlock(it) }
+    fun skipBlock(id: Int) = act(id) { skipBlock(it) }
+    fun cancelBlock(id: Int) = act(id) { cancelBlock(it) }
+
+    fun rescheduleBlock(id: Int, plannedStart: String, plannedEnd: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    buildApi().rescheduleBlock(id, RescheduleRequest(plannedStart, plannedEnd))
+                }
+            } catch (_: Exception) {
+            }
+            refreshNow(showLoading = false)
+            refreshDayPlan()
         }
     }
 
     fun updateServerUrl(url: String) {
-        viewModelScope.launch {
-            settingsStore.setServerUrl(url)
-        }
+        viewModelScope.launch { settingsStore.setServerUrl(url) }
     }
 
     fun provisionAccessCredentials(clientId: String, clientSecret: String) {
         settingsStore.setAccessCredentials(clientId, clientSecret)
-        refresh()
+        refreshNow()
     }
 }

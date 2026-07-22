@@ -9,17 +9,22 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -28,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
@@ -36,12 +42,15 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.lifeos.app.ui.DayScreen
 import com.lifeos.app.ui.NowScreen
+import com.lifeos.app.ui.ProjectsScreen
 import com.lifeos.app.ui.SettingsScreen
 import com.lifeos.app.ui.theme.LifeOsTheme
+import com.lifeos.app.ui.toUiState
 import com.lifeos.app.update.UpdateChecker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.OffsetDateTime
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -95,7 +104,9 @@ private fun LifeOsRoot(
     ensureInstallPermission: () -> Boolean,
 ) {
     val navController = rememberNavController()
-    val state by viewModel.state.collectAsState()
+    val nowState by viewModel.nowState.collectAsState()
+    val dayPlan by viewModel.dayPlan.collectAsState()
+    val projects by viewModel.projects.collectAsState()
     val serverUrl by viewModel.serverUrl.collectAsState()
     val accessClientId by viewModel.accessClientId.collectAsState()
     val accessClientSecret by viewModel.accessClientSecret.collectAsState()
@@ -126,6 +137,16 @@ private fun LifeOsRoot(
     }
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Life OS") },
+                actions = {
+                    IconButton(onClick = { navController.navigate("settings") }) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Настройки")
+                    }
+                },
+            )
+        },
         bottomBar = {
             NavigationBar {
                 val backStackEntry by navController.currentBackStackEntryAsState()
@@ -137,16 +158,22 @@ private fun LifeOsRoot(
                     label = { Text("Сейчас") },
                 )
                 NavigationBarItem(
-                    selected = currentRoute == "day",
-                    onClick = { navController.navigate("day") },
+                    selected = currentRoute == "plan",
+                    onClick = {
+                        navController.navigate("plan")
+                        viewModel.refreshDayPlan()
+                    },
                     icon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
-                    label = { Text("День") },
+                    label = { Text("План") },
                 )
                 NavigationBarItem(
-                    selected = currentRoute == "settings",
-                    onClick = { navController.navigate("settings") },
-                    icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                    label = { Text("Настройки") },
+                    selected = currentRoute == "projects",
+                    onClick = {
+                        navController.navigate("projects")
+                        viewModel.refreshProjects()
+                    },
+                    icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                    label = { Text("Проекты") },
                 )
             }
         },
@@ -154,21 +181,36 @@ private fun LifeOsRoot(
         Box(modifier = Modifier.padding(padding)) {
             NavHost(navController = navController, startDestination = "now") {
                 composable("now") {
-                    when (val s = state) {
-                        is LoadState.Loaded -> NowScreen(
-                            dashboard = s.dashboard,
+                    when (val s = nowState) {
+                        is ConnectionState.Loaded -> NowScreen(
+                            state = s.now.toUiState(),
+                            dayDeviation = s.now.day_deviation,
+                            fetchedAtMillis = s.fetchedAtMillis,
+                            onStart = viewModel::startBlock,
+                            onPause = viewModel::pauseBlock,
+                            onResume = viewModel::resumeBlock,
                             onComplete = viewModel::completeBlock,
                             onSkip = viewModel::skipBlock,
+                            onReschedule = { id ->
+                                val block = s.now.current_block
+                                if (block != null) {
+                                    val start = OffsetDateTime.parse(block.planned_start).plusDays(1)
+                                    val end = OffsetDateTime.parse(block.planned_end).plusDays(1)
+                                    viewModel.rescheduleBlock(id, start.toString(), end.toString())
+                                }
+                            },
                         )
-                        is LoadState.Error -> Text("Ошибка: ${s.message}")
-                        is LoadState.Loading -> CircularProgressIndicator()
+                        is ConnectionState.NoConnection -> CenteredMessage("Нет соединения")
+                        is ConnectionState.ServerUnavailable -> CenteredMessage("Сервер недоступен")
+                        is ConnectionState.Loading -> CenteredProgress()
                     }
                 }
-                composable("day") {
-                    when (val s = state) {
-                        is LoadState.Loaded -> DayScreen(s.dashboard.blocks)
-                        else -> CircularProgressIndicator()
-                    }
+                composable("plan") {
+                    val plan = dayPlan
+                    if (plan != null) DayScreen(plan.blocks) else CenteredProgress()
+                }
+                composable("projects") {
+                    ProjectsScreen(projects)
                 }
                 composable("settings") {
                     SettingsScreen(
@@ -208,5 +250,19 @@ private fun LifeOsRoot(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CenteredProgress() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator()
+    }
+}
+
+@Composable
+private fun CenteredMessage(text: String) {
+    Box(modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center)) {
+        Text(text)
     }
 }
