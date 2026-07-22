@@ -9,7 +9,6 @@ import com.lifeos.app.data.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -28,32 +27,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _serverUrl = MutableStateFlow(SettingsStore.DEFAULT_URL)
     val serverUrl: StateFlow<String> = _serverUrl
 
-    private val _accessClientId = MutableStateFlow("")
-    val accessClientId: StateFlow<String> = _accessClientId
-
-    private val _accessClientSecret = MutableStateFlow("")
-    val accessClientSecret: StateFlow<String> = _accessClientSecret
+    val accessClientId: StateFlow<String> = settingsStore.accessClientId
+    val accessClientSecret: StateFlow<String> = settingsStore.accessClientSecret
 
     init {
+        viewModelScope.launch {
+            // Any secret from the old plaintext DataStore is already compromised
+            // (it sat unencrypted on disk) - discard rather than migrate forward.
+            settingsStore.discardLegacyPlaintextCredentials()
+        }
         viewModelScope.launch {
             settingsStore.serverUrl.collect { url ->
                 _serverUrl.value = url
                 refresh()
             }
         }
-        viewModelScope.launch {
-            settingsStore.accessClientId.collect { _accessClientId.value = it }
-        }
-        viewModelScope.launch {
-            settingsStore.accessClientSecret.collect { _accessClientSecret.value = it }
-        }
     }
 
-    private suspend fun buildApi(): com.lifeos.app.data.LifeOsApi {
-        val url = settingsStore.serverUrl.first()
-        val clientId = settingsStore.accessClientId.first()
-        val clientSecret = settingsStore.accessClientSecret.first()
-        return ApiFactory.create(url, clientId, clientSecret)
+    private fun buildApi(): com.lifeos.app.data.LifeOsApi {
+        return ApiFactory.create(_serverUrl.value, accessClientId.value, accessClientSecret.value)
     }
 
     fun refresh() {
@@ -89,9 +81,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun provisionAccessCredentials(clientId: String, clientSecret: String) {
-        viewModelScope.launch {
-            settingsStore.setAccessCredentials(clientId, clientSecret)
-            refresh()
-        }
+        settingsStore.setAccessCredentials(clientId, clientSecret)
+        refresh()
     }
 }

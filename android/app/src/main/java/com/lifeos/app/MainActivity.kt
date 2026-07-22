@@ -173,8 +173,11 @@ private fun LifeOsRoot(
                 composable("settings") {
                     SettingsScreen(
                         currentUrl = serverUrl,
-                        currentAccessClientId = accessClientId,
-                        currentAccessClientSecret = accessClientSecret,
+                        hasAccessCredentials = accessClientId.isNotBlank() && accessClientSecret.isNotBlank(),
+                        accessClientSecretMasked = run {
+                            val secret = accessClientSecret
+                            if (secret.length < 4) "" else "••••••••" + secret.takeLast(4)
+                        },
                         onSave = viewModel::updateServerUrl,
                         onSaveAccessCredentials = viewModel::provisionAccessCredentials,
                         onCheckUpdate = {
