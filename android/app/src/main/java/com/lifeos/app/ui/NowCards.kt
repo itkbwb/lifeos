@@ -7,7 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -56,11 +57,11 @@ private fun AccentedCard(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceContainerHighDark),
     ) {
-        Row {
+        Row(Modifier.height(IntrinsicSize.Min)) {
             Box(
                 modifier = Modifier
                     .width(5.dp)
-                    .fillMaxSize()
+                    .fillMaxHeight()
                     .background(accent),
             )
             Column(Modifier.padding(20.dp), content = content)
