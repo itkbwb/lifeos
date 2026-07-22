@@ -78,8 +78,10 @@ class MainActivity : ComponentActivity() {
     private fun handleProvisioningIntent(intent: Intent) {
         val clientId = intent.getStringExtra("cf_client_id")
         val clientSecret = intent.getStringExtra("cf_client_secret")
+        android.util.Log.e("LifeOS", "handleProvisioningIntent id_len=${clientId?.length} secret_len=${clientSecret?.length}")
         if (!clientId.isNullOrBlank() && !clientSecret.isNullOrBlank()) {
             viewModel.provisionAccessCredentials(clientId, clientSecret)
+            android.util.Log.e("LifeOS", "provisionAccessCredentials called")
         }
     }
 

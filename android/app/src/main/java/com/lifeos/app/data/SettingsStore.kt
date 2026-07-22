@@ -49,10 +49,12 @@ class SettingsStore(private val context: Context) {
     }
 
     fun setAccessCredentials(clientId: String, clientSecret: String) {
+        android.util.Log.e("LifeOS", "setAccessCredentials id_len=${clientId.length} secret_len=${clientSecret.length}")
         securePrefs.edit()
             .putString(KEY_CLIENT_ID, clientId)
             .putString(KEY_CLIENT_SECRET, clientSecret)
-            .apply()
+            .commit()
+            .also { android.util.Log.e("LifeOS", "securePrefs.commit() success=$it") }
         _accessClientId.value = clientId
         _accessClientSecret.value = clientSecret
     }
