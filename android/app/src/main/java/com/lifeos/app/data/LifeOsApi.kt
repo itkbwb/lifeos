@@ -56,4 +56,7 @@ interface LifeOsApi {
 
     @POST("api/blocks/{id}/reschedule")
     suspend fun rescheduleBlock(@Path("id") id: Int, @Body body: RescheduleRequest): Block
+
+    @POST("api/blocks/{id}/queue")
+    suspend fun queueBlock(@Path("id") id: Int, @Body body: QueueRequest): Block
 }

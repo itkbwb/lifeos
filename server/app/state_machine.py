@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -65,6 +65,15 @@ def start_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBlo
 
     if block.status != BlockStatus.PLANNED.value:
         raise InvalidTransitionError(f"Cannot start a block in status '{block.status}'")
+
+    # Starting a block outside its originally planned window moves it to
+    # start now (same duration) - otherwise "Сейчас" and the calendar would
+    # keep showing the stale original slot while the real work happens
+    # somewhere else on the timeline.
+    if not (block.planned_start <= now < block.planned_end):
+        duration = block.planned_end - block.planned_start
+        block.planned_start = now
+        block.planned_end = now + duration
 
     # Switching tasks: starting a new block while another is active pauses
     # the other one rather than erroring - the user explicitly chose to

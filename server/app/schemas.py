@@ -44,3 +44,7 @@ class RescheduleRequest(BaseModel):
 
     _validate_start = field_validator("planned_start")(_require_aware)
     _validate_end = field_validator("planned_end")(_require_aware)
+
+
+class QueueRequest(BaseModel):
+    break_minutes: int = Field(default=0, ge=0, le=24 * 60)

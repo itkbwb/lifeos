@@ -49,6 +49,30 @@ def test_start_invalid_from_completed(db_session, user, now):
         start_block(db_session, block, now)
 
 
+def test_start_outside_window_moves_block_to_now(db_session, user, now):
+    later = now + timedelta(hours=3)
+    block = make_block(
+        db_session, user,
+        planned_start=now, planned_end=now + timedelta(hours=1), now=now,
+    )
+    updated = start_block(db_session, block, later)
+
+    assert updated.planned_start == later
+    assert updated.planned_end == later + timedelta(hours=1)  # duration preserved
+
+
+def test_start_inside_window_leaves_schedule_untouched(db_session, user, now):
+    block = make_block(
+        db_session, user,
+        planned_start=now, planned_end=now + timedelta(hours=1), now=now,
+    )
+    started_at = now + timedelta(minutes=10)  # still within the window
+    updated = start_block(db_session, block, started_at)
+
+    assert updated.planned_start == now
+    assert updated.planned_end == now + timedelta(hours=1)
+
+
 def test_start_another_block_auto_pauses_the_first(db_session, user, now):
     block_a = make_block(db_session, user, now=now)
     block_b = make_block(db_session, user, now=now)

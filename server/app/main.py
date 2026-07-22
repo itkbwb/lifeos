@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Generator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from .database import SessionLocal
 from .models import Project, ScheduleBlock, User, WorkSession
-from .schemas import BlockCreate, BlockUpdate, RescheduleRequest
+from .schemas import BlockCreate, BlockUpdate, QueueRequest, RescheduleRequest
 from .seed import PLAN_END_DATE, DEFAULT_USER_EMAIL, ensure_seed_data
 from .serializers import (
     elapsed_seconds,
@@ -112,6 +112,39 @@ def _planned_minutes(block: ScheduleBlock) -> int:
     return max(0, int((block.planned_end - block.planned_start).total_seconds() // 60))
 
 
+def _active_or_paused_block(
+    db: Session, user: User, blocks: list[ScheduleBlock]
+) -> Optional[ScheduleBlock]:
+    """Whatever the user is actually working on (or has paused) right now,
+    regardless of whether its planned slot happens to match the clock - a
+    block started out of its original window is what "Сейчас" should show,
+    not whatever the schedule says should be happening."""
+    session = db.scalar(
+        select(WorkSession).where(
+            WorkSession.user_id == user.id,
+            WorkSession.status.in_(("active", "paused")),
+            WorkSession.ended_at.is_(None),
+        )
+    )
+    if session is None:
+        return None
+    return next((b for b in blocks if b.id == session.schedule_block_id), None)
+
+
+def _queue_anchor_end(db: Session, user: User, now: datetime) -> datetime:
+    """End of the last thing on the user's plate right now - the active/
+    paused block or the latest not-yet-done queued block - so queuing
+    stacks tasks one after another instead of overlapping them."""
+    latest = db.scalar(
+        select(func.max(ScheduleBlock.planned_end)).where(
+            ScheduleBlock.user_id == user.id,
+            ScheduleBlock.status.notin_(("skipped", "cancelled", "rescheduled", "completed")),
+            ScheduleBlock.planned_end >= now,
+        )
+    )
+    return latest if latest is not None else now
+
+
 @app.get("/api/now")
 def get_now(
     user: User = Depends(get_current_user),
@@ -121,15 +154,17 @@ def get_now(
     today_local = now_aware.astimezone(APP_TZ).date()
     blocks = _get_day_blocks(db, user, today_local)
 
-    current_block = next(
-        (
-            b
-            for b in blocks
-            if b.planned_start <= now_aware < b.planned_end
-            and b.status not in {"skipped", "cancelled", "rescheduled"}
-        ),
-        None,
-    )
+    current_block = _active_or_paused_block(db, user, blocks)
+    if current_block is None:
+        current_block = next(
+            (
+                b
+                for b in blocks
+                if b.planned_start <= now_aware < b.planned_end
+                and b.status not in {"skipped", "cancelled", "rescheduled"}
+            ),
+            None,
+        )
     next_block = next(
         (b for b in blocks if b.planned_start > now_aware and b.status == "planned"),
         None,
@@ -414,6 +449,26 @@ def action_reschedule(
     now = now_utc()
     try:
         new_block = reschedule_block(db, block, payload.planned_start, payload.planned_end, now)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
+    return serialize_block(db, new_block, now)
+
+
+@app.post("/api/blocks/{block_id}/queue")
+def action_queue(
+    block_id: int,
+    payload: QueueRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    anchor_end = _queue_anchor_end(db, user, now)
+    new_start = anchor_end + timedelta(minutes=payload.break_minutes)
+    duration = block.planned_end - block.planned_start
+    new_end = new_start + duration
+    try:
+        new_block = reschedule_block(db, block, new_start, new_end, now)
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail=exc.message) from exc
     return serialize_block(db, new_block, now)

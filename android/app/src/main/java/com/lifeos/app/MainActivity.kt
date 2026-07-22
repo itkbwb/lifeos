@@ -245,6 +245,7 @@ private fun LifeOsRoot(
                                     onComplete = viewModel::completeBlock,
                                     onSkip = viewModel::skipBlock,
                                     onReopen = viewModel::reopenBlock,
+                                    onQueue = viewModel::queueBlock,
                                 )
                             } else {
                                 CenteredProgress()
@@ -259,6 +260,7 @@ private fun LifeOsRoot(
                                     onComplete = viewModel::completeBlock,
                                     onSkip = viewModel::skipBlock,
                                     onReopen = viewModel::reopenBlock,
+                                    onQueue = viewModel::queueBlock,
                                 )
                             } else {
                                 CenteredProgress()

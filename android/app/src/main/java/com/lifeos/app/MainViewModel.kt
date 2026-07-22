@@ -9,6 +9,7 @@ import com.lifeos.app.data.DayPlan
 import com.lifeos.app.data.LifeOsApi
 import com.lifeos.app.data.NowResponse
 import com.lifeos.app.data.ProjectStat
+import com.lifeos.app.data.QueueRequest
 import com.lifeos.app.data.RescheduleRequest
 import com.lifeos.app.data.SettingsStore
 import kotlinx.coroutines.Dispatchers
@@ -160,6 +161,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 withContext(Dispatchers.IO) {
                     buildApi().rescheduleBlock(id, RescheduleRequest(plannedStart, plannedEnd))
+                }
+            } catch (_: Exception) {
+            }
+            refreshNow(showLoading = false)
+            refreshDayPlan()
+        }
+    }
+
+    fun queueBlock(id: Int, breakMinutes: Int) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    buildApi().queueBlock(id, QueueRequest(breakMinutes))
                 }
             } catch (_: Exception) {
             }

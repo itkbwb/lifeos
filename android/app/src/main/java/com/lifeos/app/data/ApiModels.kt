@@ -95,3 +95,7 @@ data class RescheduleRequest(
     val planned_start: String,
     val planned_end: String,
 )
+
+data class QueueRequest(
+    val break_minutes: Int = 0,
+)

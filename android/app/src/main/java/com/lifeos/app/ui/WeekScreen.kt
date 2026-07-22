@@ -56,6 +56,7 @@ fun WeekScreen(
     onComplete: (Int) -> Unit,
     onSkip: (Int) -> Unit,
     onReopen: (Int) -> Unit,
+    onQueue: (Int, Int) -> Unit,
 ) {
     if (plans.isEmpty()) return
 
@@ -148,6 +149,7 @@ fun WeekScreen(
             onComplete = { onComplete(block.id); selected = null },
             onSkip = { onSkip(block.id); selected = null },
             onReopen = { onReopen(block.id); selected = null },
+            onQueue = { minutes -> onQueue(block.id, minutes); selected = null },
         )
     }
 }
