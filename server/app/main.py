@@ -2,26 +2,41 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Optional
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .database import Base, SessionLocal, engine
-from .models import CompletionLog, Project, RoutineItem, ScheduleBlock
-from .schemas import BlockCreate, BlockUpdate
-from .seed import PLAN_END_DATE, ensure_seed_data
+from .database import SessionLocal
+from .models import Project, ScheduleBlock, User, WorkSession
+from .schemas import BlockCreate, BlockUpdate, RescheduleRequest
+from .seed import PLAN_END_DATE, DEFAULT_USER_EMAIL, ensure_seed_data
+from .serializers import (
+    elapsed_seconds,
+    find_open_session,
+    paused_seconds,
+    serialize_block,
+    serialize_project_stat,
+    serialize_work_session,
+)
+from .state_machine import (
+    ActiveSessionConflictError,
+    InvalidTransitionError,
+    cancel_block,
+    complete_block,
+    pause_block,
+    reschedule_block,
+    resume_block,
+    skip_block,
+    start_block,
+)
+from .tz import APP_TZ, now_utc
 
 BASE_DIR = Path(__file__).resolve().parent
 VERSION = (BASE_DIR.parent / "VERSION").read_text(encoding="utf-8").strip()
 
 app = FastAPI(title="Life OS", version=VERSION)
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
-templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -32,64 +47,162 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def get_current_user(db: Session = Depends(get_db)) -> User:
+    user = db.scalar(select(User).where(User.email == DEFAULT_USER_EMAIL))
+    if user is None:
+        raise HTTPException(status_code=500, detail="Default user not seeded")
+    return user
+
+
 @app.on_event("startup")
 def startup() -> None:
-    Base.metadata.create_all(bind=engine)
     ensure_seed_data()
 
 
-def _duration_minutes(block: ScheduleBlock) -> int:
-    start = block.start_time.hour * 60 + block.start_time.minute
-    end = block.end_time.hour * 60 + block.end_time.minute
-    return max(0, end - start)
+def _get_block(db: Session, user: User, block_id: int) -> ScheduleBlock:
+    block = db.scalar(
+        select(ScheduleBlock)
+        .options(selectinload(ScheduleBlock.project))
+        .where(ScheduleBlock.id == block_id, ScheduleBlock.user_id == user.id)
+    )
+    if block is None:
+        raise HTTPException(status_code=404, detail="Block not found")
+    return block
 
 
-def serialize_block(block: ScheduleBlock) -> dict:
-    return {
-        "id": block.id,
-        "block_date": block.block_date.isoformat(),
-        "start_time": block.start_time.strftime("%H:%M"),
-        "end_time": block.end_time.strftime("%H:%M"),
-        "duration_minutes": _duration_minutes(block),
-        "title": block.title,
-        "notes": block.notes,
-        "block_type": block.block_type,
-        "status": block.status,
-        "project_id": block.project_id,
-        "project_name": block.project.name if block.project else None,
-    }
+def _day_bounds_utc(local_day: date) -> tuple[datetime, datetime]:
+    """Aware UTC-equivalent bounds, suitable as ORM query bind params
+    (UTCDateTime converts aware -> naive-UTC itself on bind)."""
+    start_local = datetime.combine(local_day, datetime.min.time(), tzinfo=APP_TZ)
+    end_local = start_local + timedelta(days=1)
+    return start_local, end_local
 
 
-def get_day_blocks(db: Session, target: date) -> list[ScheduleBlock]:
+def _get_day_blocks(db: Session, user: User, local_day: date) -> list[ScheduleBlock]:
+    start_utc, end_utc = _day_bounds_utc(local_day)
     return list(
         db.scalars(
             select(ScheduleBlock)
             .options(selectinload(ScheduleBlock.project))
-            .where(ScheduleBlock.block_date == target)
-            .order_by(ScheduleBlock.start_time)
+            .where(
+                ScheduleBlock.user_id == user.id,
+                ScheduleBlock.planned_start >= start_utc,
+                ScheduleBlock.planned_start < end_utc,
+            )
+            .order_by(ScheduleBlock.planned_start)
         )
     )
 
 
-def get_week_payload(db: Session, target: date) -> list[dict]:
-    monday = target - timedelta(days=target.weekday())
-    payload: list[dict] = []
+def _actual_minutes(db: Session, block: ScheduleBlock, now: datetime) -> Optional[int]:
+    session = db.scalar(
+        select(WorkSession)
+        .where(WorkSession.schedule_block_id == block.id)
+        .order_by(WorkSession.started_at.desc())
+    )
+    if session is None:
+        return None
+    paused = paused_seconds(db, session, now)
+    return elapsed_seconds(session, now, paused) // 60
 
+
+def _planned_minutes(block: ScheduleBlock) -> int:
+    return max(0, int((block.planned_end - block.planned_start).total_seconds() // 60))
+
+
+@app.get("/api/now")
+def get_now(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    now_aware = now_utc()
+    today_local = now_aware.astimezone(APP_TZ).date()
+    blocks = _get_day_blocks(db, user, today_local)
+
+    current_block = next(
+        (
+            b
+            for b in blocks
+            if b.planned_start <= now_aware < b.planned_end
+            and b.status not in {"skipped", "cancelled", "rescheduled"}
+        ),
+        None,
+    )
+    next_block = next(
+        (b for b in blocks if b.planned_start > now_aware and b.status == "planned"),
+        None,
+    )
+
+    active_session = db.scalar(
+        select(WorkSession).where(WorkSession.user_id == user.id, WorkSession.ended_at.is_(None))
+    )
+
+    minutes_late_starting = 0
+    if current_block is not None and current_block.status == "planned" and active_session is None:
+        late = (now_aware - current_block.planned_start).total_seconds() / 60
+        minutes_late_starting = max(0, int(late))
+
+    deviation_minutes = 0
+    for b in blocks:
+        if b.status == "completed":
+            actual = _actual_minutes(db, b, now_aware)
+            if actual is not None:
+                deviation_minutes += actual - _planned_minutes(b)
+
+    return {
+        "date": today_local.isoformat(),
+        "current_block": serialize_block(db, current_block, now_aware) if current_block else None,
+        "active_work_session": (
+            serialize_work_session(db, active_session, now_aware) if active_session else None
+        ),
+        "next_block": serialize_block(db, next_block, now_aware) if next_block else None,
+        "day_deviation": {
+            "minutes_late_starting": minutes_late_starting,
+            "minutes_over_under_planned": deviation_minutes,
+        },
+    }
+
+
+@app.get("/api/plan/day")
+def get_plan_day(
+    plan_date: Optional[date] = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    now = now_utc()
+    target = plan_date or now.astimezone(APP_TZ).date()
+    blocks = _get_day_blocks(db, user, target)
+    return {
+        "date": target.isoformat(),
+        "plan_end_date": PLAN_END_DATE.isoformat(),
+        "blocks": [serialize_block(db, b, now) for b in blocks],
+    }
+
+
+@app.get("/api/plan/week")
+def get_plan_week(
+    plan_date: Optional[date] = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    now = now_utc()
+    target = plan_date or now.astimezone(APP_TZ).date()
+    monday = target - timedelta(days=target.weekday())
+
+    days = []
     for offset in range(7):
         day = monday + timedelta(days=offset)
-        blocks = get_day_blocks(db, day)
-        total = sum(_duration_minutes(b) for b in blocks)
+        blocks = _get_day_blocks(db, user, day)
+        total = sum(_planned_minutes(b) for b in blocks)
         productive = sum(
-            _duration_minutes(b)
-            for b in blocks
-            if b.block_type in {"work", "health", "life"}
+            _planned_minutes(b) for b in blocks if b.block_type in {"work", "health", "life"}
         )
-        completed = sum(
-            _duration_minutes(b)
-            for b in blocks
-            if b.status == "completed"
-        )
-        payload.append(
+        completed = 0
+        for b in blocks:
+            if b.status == "completed":
+                actual = _actual_minutes(db, b, now)
+                completed += actual if actual is not None else _planned_minutes(b)
+        days.append(
             {
                 "date": day.isoformat(),
                 "weekday": day.strftime("%a"),
@@ -99,149 +212,86 @@ def get_week_payload(db: Session, target: date) -> list[dict]:
                 "block_count": len(blocks),
             }
         )
-    return payload
+    return {"days": days}
 
 
-def get_project_payload(db: Session, target: date) -> list[dict]:
+@app.get("/api/projects")
+def get_projects(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    now = now_utc()
+    target = now.astimezone(APP_TZ).date()
     monday = target - timedelta(days=target.weekday())
     sunday = monday + timedelta(days=6)
+    start_utc, _ = _day_bounds_utc(monday)
+    _, end_utc = _day_bounds_utc(sunday)
 
     projects = list(
         db.scalars(
             select(Project)
-            .where(Project.is_active.is_(True))
+            .where(Project.user_id == user.id, Project.is_active.is_(True))
             .order_by(Project.priority.desc(), Project.name)
         )
     )
-
-    result: list[dict] = []
+    result = []
     for project in projects:
         blocks = list(
             db.scalars(
-                select(ScheduleBlock)
-                .where(
+                select(ScheduleBlock).where(
                     ScheduleBlock.project_id == project.id,
-                    ScheduleBlock.block_date >= monday,
-                    ScheduleBlock.block_date <= sunday,
+                    ScheduleBlock.planned_start >= start_utc,
+                    ScheduleBlock.planned_start < end_utc,
                 )
             )
         )
-        scheduled = sum(_duration_minutes(b) for b in blocks)
-        completed = sum(
-            _duration_minutes(b)
-            for b in blocks
-            if b.status == "completed"
-        )
-        result.append(
-            {
-                "id": project.id,
-                "name": project.name,
-                "priority": project.priority,
-                "category": project.category,
-                "scheduled_minutes": scheduled,
-                "completed_minutes": completed,
-                "block_count": len(blocks),
-            }
-        )
+        result.append(serialize_project_stat(project, blocks))
     return result
 
 
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request, db: Session = Depends(get_db)):
-    today = date.today()
-    blocks = get_day_blocks(db, today)
-    projects = list(
-        db.scalars(
-            select(Project)
-            .where(Project.is_active.is_(True))
-            .order_by(Project.priority.desc())
-        )
-    )
-
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context={
-            "version": VERSION,
-            "today": today.isoformat(),
-            "plan_end_date": PLAN_END_DATE.isoformat(),
-            "blocks": [serialize_block(b) for b in blocks],
-            "week": get_week_payload(db, today),
-            "project_stats": get_project_payload(db, today),
-            "projects": [
-                {
-                    "id": p.id,
-                    "name": p.name,
-                    "priority": p.priority,
-                    "category": p.category,
-                }
-                for p in projects
-            ],
-        },
-    )
-
-
-@app.get("/api/dashboard")
-def dashboard(
-    block_date: date | None = None,
-    db: Session = Depends(get_db),
-):
-    target = block_date or date.today()
-    return {
-        "date": target.isoformat(),
-        "plan_end_date": PLAN_END_DATE.isoformat(),
-        "blocks": [serialize_block(b) for b in get_day_blocks(db, target)],
-        "week": get_week_payload(db, target),
-        "projects": get_project_payload(db, target),
-    }
-
-
-@app.get("/api/blocks")
-def get_blocks(
-    block_date: date | None = None,
-    db: Session = Depends(get_db),
-):
-    target = block_date or date.today()
-    return [serialize_block(b) for b in get_day_blocks(db, target)]
-
-
 @app.post("/api/blocks")
-def create_block(payload: BlockCreate, db: Session = Depends(get_db)):
-    if payload.end_time <= payload.start_time:
-        raise HTTPException(status_code=400, detail="End time must be after start time")
-
+def create_block(
+    payload: BlockCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if payload.planned_end <= payload.planned_start:
+        raise HTTPException(status_code=400, detail="planned_end must be after planned_start")
     if payload.project_id is not None and db.get(Project, payload.project_id) is None:
         raise HTTPException(status_code=400, detail="Project not found")
 
-    block = ScheduleBlock(**payload.model_dump())
+    now = now_utc()
+    block = ScheduleBlock(
+        user_id=user.id,
+        project_id=payload.project_id,
+        block_type=payload.block_type,
+        title=payload.title,
+        description=payload.description,
+        planned_start=payload.planned_start,
+        planned_end=payload.planned_end,
+        created_at=now,
+        updated_at=now,
+    )
     db.add(block)
     db.commit()
     db.refresh(block)
-
-    block = db.scalar(
-        select(ScheduleBlock)
-        .options(selectinload(ScheduleBlock.project))
-        .where(ScheduleBlock.id == block.id)
-    )
-    return serialize_block(block)
+    return serialize_block(db, block, now)
 
 
 @app.patch("/api/blocks/{block_id}")
 def update_block(
     block_id: int,
     payload: BlockUpdate,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    block = db.get(ScheduleBlock, block_id)
-    if block is None:
-        raise HTTPException(status_code=404, detail="Block not found")
-
+    block = _get_block(db, user, block_id)
     values = payload.model_dump(exclude_unset=True)
-    future_start = values.get("start_time", block.start_time)
-    future_end = values.get("end_time", block.end_time)
 
+    future_start = values.get("planned_start", block.planned_start)
+    future_end = values.get("planned_end", block.planned_end)
     if future_end <= future_start:
-        raise HTTPException(status_code=400, detail="End time must be after start time")
+        raise HTTPException(status_code=400, detail="planned_end must be after planned_start")
 
     if "project_id" in values and values["project_id"] is not None:
         if db.get(Project, values["project_id"]) is None:
@@ -249,70 +299,98 @@ def update_block(
 
     for key, value in values.items():
         setattr(block, key, value)
-
+    block.updated_at = now_utc()
     db.commit()
-
-    block = db.scalar(
-        select(ScheduleBlock)
-        .options(selectinload(ScheduleBlock.project))
-        .where(ScheduleBlock.id == block.id)
-    )
-    return serialize_block(block)
-
-
-@app.post("/api/blocks/{block_id}/action")
-def block_action(
-    block_id: int,
-    action: str = Form(...),
-    db: Session = Depends(get_db),
-):
-    block = db.get(ScheduleBlock, block_id)
-    if block is None:
-        raise HTTPException(status_code=404, detail="Block not found")
-
-    if action not in {"completed", "skipped", "planned"}:
-        raise HTTPException(status_code=400, detail="Invalid action")
-
-    block.status = action
-    db.add(CompletionLog(block_id=block.id, action=action))
-    db.commit()
-    return {"ok": True, "status": action}
+    db.refresh(block)
+    return serialize_block(db, block, now_utc())
 
 
 @app.delete("/api/blocks/{block_id}")
-def delete_block(block_id: int, db: Session = Depends(get_db)):
-    block = db.get(ScheduleBlock, block_id)
-    if block is None:
-        raise HTTPException(status_code=404, detail="Block not found")
-
+def delete_block(
+    block_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    block = _get_block(db, user, block_id)
     db.delete(block)
     db.commit()
     return {"ok": True}
 
 
-@app.get("/api/projects")
-def projects(db: Session = Depends(get_db)):
-    return get_project_payload(db, date.today())
+def _run_transition(fn, db: Session, block: ScheduleBlock, now: datetime):
+    try:
+        return fn(db, block, now)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
+    except ActiveSessionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "active_session_conflict", "active_work_session_id": exc.active_work_session_id},
+        ) from exc
 
 
-@app.get("/api/routines")
-def routines(db: Session = Depends(get_db)):
-    items = list(
-        db.scalars(
-            select(RoutineItem)
-            .where(RoutineItem.is_active.is_(True))
-            .order_by(RoutineItem.routine_name, RoutineItem.position)
-        )
-    )
-    return [
-        {
-            "id": item.id,
-            "routine_name": item.routine_name,
-            "title": item.title,
-            "position": item.position,
-        }
-        for item in items
-    ]
+@app.post("/api/blocks/{block_id}/start")
+def action_start(block_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    block = _run_transition(start_block, db, block, now)
+    return serialize_block(db, block, now)
+
+
+@app.post("/api/blocks/{block_id}/pause")
+def action_pause(block_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    block = _run_transition(pause_block, db, block, now)
+    return serialize_block(db, block, now)
+
+
+@app.post("/api/blocks/{block_id}/resume")
+def action_resume(block_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    block = _run_transition(resume_block, db, block, now)
+    return serialize_block(db, block, now)
+
+
+@app.post("/api/blocks/{block_id}/complete")
+def action_complete(block_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    block = _run_transition(complete_block, db, block, now)
+    return serialize_block(db, block, now)
+
+
+@app.post("/api/blocks/{block_id}/skip")
+def action_skip(block_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    block = _run_transition(skip_block, db, block, now)
+    return serialize_block(db, block, now)
+
+
+@app.post("/api/blocks/{block_id}/cancel")
+def action_cancel(block_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    block = _run_transition(cancel_block, db, block, now)
+    return serialize_block(db, block, now)
+
+
+@app.post("/api/blocks/{block_id}/reschedule")
+def action_reschedule(
+    block_id: int,
+    payload: RescheduleRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    try:
+        new_block = reschedule_block(db, block, payload.planned_start, payload.planned_end, now)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
+    return serialize_block(db, new_block, now)
 
 
 @app.get("/health")
@@ -320,29 +398,5 @@ def health():
     return {
         "status": "ok",
         "version": VERSION,
-        "time": datetime.now().isoformat(),
+        "time": now_utc().isoformat(),
     }
-
-
-@app.get("/manifest.json", include_in_schema=False)
-def manifest():
-    return JSONResponse(
-        {
-            "name": "Life OS",
-            "short_name": "Life OS",
-            "description": "Personal mission control",
-            "start_url": "/",
-            "display": "standalone",
-            "orientation": "portrait",
-            "background_color": "#09080d",
-            "theme_color": "#09080d",
-            "icons": [
-                {
-                    "src": "/static/icon.svg",
-                    "sizes": "any",
-                    "type": "image/svg+xml",
-                    "purpose": "any maskable",
-                }
-            ],
-        }
-    )
