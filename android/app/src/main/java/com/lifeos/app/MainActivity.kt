@@ -103,11 +103,7 @@ private fun LifeOsRoot(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    LaunchedEffect(Unit) {
-        val info = withContext(Dispatchers.IO) {
-            runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
-        } ?: return@LaunchedEffect
-
+    suspend fun downloadAndInstall(info: UpdateChecker.UpdateInfo) {
         updateStatus = "Скачиваю версию ${info.version}…"
         val uri = withContext(Dispatchers.IO) {
             runCatching { updateChecker.downloadApk(info) }.getOrNull()
@@ -117,7 +113,16 @@ private fun LifeOsRoot(
             if (ensureInstallPermission()) {
                 context.startActivity(updateChecker.installIntent(uri))
             }
+        } else {
+            updateStatus = "Не удалось скачать обновление"
         }
+    }
+
+    LaunchedEffect(Unit) {
+        val info = withContext(Dispatchers.IO) {
+            runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
+        } ?: return@LaunchedEffect
+        downloadAndInstall(info)
     }
 
     Scaffold(
@@ -180,6 +185,19 @@ private fun LifeOsRoot(
                                 }
                                 updateStatus = info?.let { "Доступна версия ${it.version}" }
                                     ?: "Установлена последняя версия"
+                            }
+                        },
+                        onUpdateNow = {
+                            scope.launch {
+                                updateStatus = "Проверка…"
+                                val info = withContext(Dispatchers.IO) {
+                                    runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
+                                }
+                                if (info != null) {
+                                    downloadAndInstall(info)
+                                } else {
+                                    updateStatus = "Установлена последняя версия"
+                                }
                             }
                         },
                         updateStatus = updateStatus,

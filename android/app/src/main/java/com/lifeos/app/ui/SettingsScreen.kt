@@ -1,12 +1,17 @@
 package com.lifeos.app.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,15 +30,18 @@ fun SettingsScreen(
     onSave: (String) -> Unit,
     onSaveAccessCredentials: (String, String) -> Unit,
     onCheckUpdate: () -> Unit,
+    onUpdateNow: () -> Unit,
     updateStatus: String,
 ) {
     var url by remember(currentUrl) { mutableStateOf(currentUrl) }
     var clientId by remember(currentAccessClientId) { mutableStateOf(currentAccessClientId) }
     var clientSecret by remember(currentAccessClientSecret) { mutableStateOf(currentAccessClientSecret) }
+    var tokenSavedFeedback by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
     ) {
         Text("Адрес сервера")
@@ -64,11 +72,24 @@ fun SettingsScreen(
             placeholder = { Text("CF-Access-Client-Secret") },
         )
         Spacer(Modifier.height(16.dp))
-        Button(onClick = { onSaveAccessCredentials(clientId, clientSecret) }) { Text("Сохранить токен") }
+        Button(
+            onClick = {
+                onSaveAccessCredentials(clientId, clientSecret)
+                tokenSavedFeedback = true
+            },
+        ) { Text("Сохранить токен") }
+        if (tokenSavedFeedback) {
+            Spacer(Modifier.height(8.dp))
+            Text("Сохранено")
+        }
 
         Spacer(Modifier.height(32.dp))
-        Button(onClick = onCheckUpdate) { Text("Проверить обновления") }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = onUpdateNow) { Text("Обновить") }
+            OutlinedButton(onClick = onCheckUpdate) { Text("Проверить") }
+        }
         Spacer(Modifier.height(8.dp))
         Text(updateStatus)
+        Spacer(Modifier.height(24.dp))
     }
 }
