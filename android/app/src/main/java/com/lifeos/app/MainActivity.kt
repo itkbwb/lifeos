@@ -49,10 +49,28 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleProvisioningIntent(intent)
         setContent {
             LifeOsTheme {
                 LifeOsRoot(viewModel, updateChecker, ::ensureInstallPermission)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleProvisioningIntent(intent)
+    }
+
+    /**
+     * Lets `adb shell am start ... --es cf_client_id X --es cf_client_secret Y` provision
+     * Cloudflare Access service token credentials without them ever passing through chat.
+     */
+    private fun handleProvisioningIntent(intent: Intent) {
+        val clientId = intent.getStringExtra("cf_client_id")
+        val clientSecret = intent.getStringExtra("cf_client_secret")
+        if (!clientId.isNullOrBlank() && !clientSecret.isNullOrBlank()) {
+            viewModel.provisionAccessCredentials(clientId, clientSecret)
         }
     }
 

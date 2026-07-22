@@ -6,15 +6,25 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object ApiFactory {
-    fun create(baseUrl: String): LifeOsApi {
+    fun create(baseUrl: String, accessClientId: String = "", accessClientSecret: String = ""): LifeOsApi {
         val normalized = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
-        val client = OkHttpClient.Builder()
+        val clientBuilder = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
-            .build()
+
+        if (accessClientId.isNotBlank() && accessClientSecret.isNotBlank()) {
+            clientBuilder.addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("CF-Access-Client-Id", accessClientId)
+                    .addHeader("CF-Access-Client-Secret", accessClientSecret)
+                    .build()
+                chain.proceed(request)
+            }
+        }
+
         return Retrofit.Builder()
             .baseUrl(normalized)
-            .client(client)
+            .client(clientBuilder.build())
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(LifeOsApi::class.java)

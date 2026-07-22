@@ -37,14 +37,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun buildApi(): com.lifeos.app.data.LifeOsApi {
+        val url = settingsStore.serverUrl.first()
+        val clientId = settingsStore.accessClientId.first()
+        val clientSecret = settingsStore.accessClientSecret.first()
+        return ApiFactory.create(url, clientId, clientSecret)
+    }
+
     fun refresh() {
         viewModelScope.launch {
             _state.value = LoadState.Loading
             try {
-                val url = settingsStore.serverUrl.first()
-                val dashboard = withContext(Dispatchers.IO) {
-                    ApiFactory.create(url).getDashboard()
-                }
+                val dashboard = withContext(Dispatchers.IO) { buildApi().getDashboard() }
                 _state.value = LoadState.Loaded(dashboard)
             } catch (e: Exception) {
                 _state.value = LoadState.Error(e.message ?: "Network error")
@@ -58,10 +62,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun act(id: Int, action: String) {
         viewModelScope.launch {
             try {
-                val url = settingsStore.serverUrl.first()
-                withContext(Dispatchers.IO) {
-                    ApiFactory.create(url).blockAction(id, action)
-                }
+                withContext(Dispatchers.IO) { buildApi().blockAction(id, action) }
                 refresh()
             } catch (_: Exception) {
                 // Next manual refresh will retry; nothing to reconcile locally.
@@ -70,6 +71,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateServerUrl(url: String) {
-        viewModelScope.launch { settingsStore.setServerUrl(url) }
+        viewModelScope.launch {
+            settingsStore.setServerUrl(url)
+        }
+    }
+
+    fun provisionAccessCredentials(clientId: String, clientSecret: String) {
+        viewModelScope.launch {
+            settingsStore.setAccessCredentials(clientId, clientSecret)
+            refresh()
+        }
     }
 }
