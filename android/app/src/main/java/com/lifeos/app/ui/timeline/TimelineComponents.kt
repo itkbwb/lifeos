@@ -20,19 +20,47 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lifeos.app.data.Block
-import com.lifeos.app.ui.theme.Lavender100
 import com.lifeos.app.ui.theme.Lavender200
 import com.lifeos.app.ui.theme.Lavender300
 import com.lifeos.app.ui.theme.Lavender500
-import com.lifeos.app.ui.theme.SurfaceContainerHighDark
-import com.lifeos.app.ui.theme.SurfaceVariantDark
 
-private fun blockColor(status: String): Color = when (status) {
-    "active", "paused" -> Lavender500
-    "ready" -> Lavender300
-    "completed" -> Color(0xFF4A465A)
-    "skipped", "cancelled" -> Color(0xFF2A2638)
-    else -> SurfaceVariantDark
+/** Stable per-project/type pastel hues so blocks stay recognizable at a
+ * glance across the day and week views, independent of their status. */
+private val CategoryPalette = listOf(
+    Color(0xFFB8E0D2), // mint
+    Color(0xFFFFD6A5), // apricot
+    Color(0xFFFFADAD), // coral
+    Color(0xFFA0C4FF), // sky
+    Color(0xFFCAB8FF), // lilac
+    Color(0xFFFDFFB6), // butter
+    Color(0xFF9BF6FF), // cyan
+    Color(0xFFFFC6FF), // pink
+)
+
+private fun categoryPastel(block: Block): Color {
+    val key = block.project_name ?: block.block_type
+    val index = (key.hashCode() and 0x7fffffff) % CategoryPalette.size
+    return CategoryPalette[index]
+}
+
+/** Picks readable text over an arbitrary background instead of hardcoding
+ * dark/light per branch - this is what previously let a status fall through
+ * to a near-black background with near-black text. */
+private fun contrastingText(bg: Color): Color {
+    val luminance = 0.299f * bg.red + 0.587f * bg.green + 0.114f * bg.blue
+    return if (luminance > 0.55f) Color(0xFF1B1626) else Color(0xFFF5F2FF)
+}
+
+private data class BlockPalette(val background: Color, val text: Color)
+
+private fun paletteFor(block: Block): BlockPalette = when (block.status) {
+    "active", "paused" -> BlockPalette(Lavender500, Color(0xFF09080D))
+    "completed" -> BlockPalette(Color(0xFF4A465A).copy(alpha = 0.35f), Lavender200)
+    "skipped", "cancelled", "rescheduled" -> BlockPalette(Color(0xFF2A2638).copy(alpha = 0.35f), Lavender200)
+    else -> { // "planned", "ready", or any status not yet modeled - always legible
+        val pastel = categoryPastel(block)
+        BlockPalette(pastel, contrastingText(pastel))
+    }
 }
 
 /** One time-positioned block. Caller supplies absolute offsetY/height in dp
@@ -45,14 +73,13 @@ fun TimelineBlockCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val bg = blockColor(block.status)
-    val muted = block.status in setOf("completed", "skipped", "cancelled", "rescheduled")
+    val palette = paletteFor(block)
     Box(
         modifier = modifier
             .height(heightDp.dp.coerceAtLeastDp(18.dp))
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(bg.copy(alpha = if (muted) 0.35f else 0.9f))
+            .background(palette.background)
             .clickable(onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
@@ -61,7 +88,7 @@ fun TimelineBlockCard(
                 text = block.title,
                 fontSize = if (compact) 10.sp else 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (muted) Lavender200 else Color(0xFF09080D),
+                color = palette.text,
                 maxLines = if (heightDp < 40) 1 else 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -69,7 +96,7 @@ fun TimelineBlockCard(
                 Text(
                     text = "${formatLocalTime(block.planned_start)}–${formatLocalTime(block.planned_end)}",
                     fontSize = 10.sp,
-                    color = if (muted) Lavender200 else Color(0xFF09080D).copy(alpha = 0.7f),
+                    color = palette.text.copy(alpha = 0.75f),
                 )
             }
         }

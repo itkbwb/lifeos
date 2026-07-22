@@ -55,6 +55,11 @@ fun BlockActionDialog(
                     Spacer(Modifier.height(4.dp))
                     Text(block.project_name, color = Lavender300)
                 }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Статус: ${statusLabels[block.status] ?: block.status}",
+                    color = Lavender300,
+                )
             }
         },
         confirmButton = {
