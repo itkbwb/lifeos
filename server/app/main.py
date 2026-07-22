@@ -26,6 +26,7 @@ from .state_machine import (
     cancel_block,
     complete_block,
     pause_block,
+    reopen_block,
     reschedule_block,
     restart_block,
     resume_block,
@@ -375,6 +376,14 @@ def action_restart(block_id: int, user: User = Depends(get_current_user), db: Se
     block = _get_block(db, user, block_id)
     now = now_utc()
     block = _run_transition(restart_block, db, block, now)
+    return serialize_block(db, block, now)
+
+
+@app.post("/api/blocks/{block_id}/reopen")
+def action_reopen(block_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    block = _run_transition(reopen_block, db, block, now)
     return serialize_block(db, block, now)
 
 

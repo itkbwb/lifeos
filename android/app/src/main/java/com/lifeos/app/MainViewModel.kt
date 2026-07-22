@@ -148,6 +148,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startBlock(id: Int) = act(id) { startBlock(it) }
     fun restartBlock(id: Int) = act(id) { restartBlock(it) }
+    fun reopenBlock(id: Int) = act(id) { reopenBlock(it) }
     fun pauseBlock(id: Int) = act(id) { pauseBlock(it) }
     fun resumeBlock(id: Int) = act(id) { resumeBlock(it) }
     fun completeBlock(id: Int) = act(id) { completeBlock(it) }

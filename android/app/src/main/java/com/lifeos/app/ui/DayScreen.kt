@@ -37,6 +37,7 @@ fun DayScreen(
     onResume: (Int) -> Unit,
     onComplete: (Int) -> Unit,
     onSkip: (Int) -> Unit,
+    onReopen: (Int) -> Unit,
 ) {
     var selected by remember { mutableStateOf<Block?>(null) }
     val day: LocalDate = remember(plan.date) { LocalDate.parse(plan.date) }
@@ -85,6 +86,7 @@ fun DayScreen(
             onResume = { onResume(block.id); selected = null },
             onComplete = { onComplete(block.id); selected = null },
             onSkip = { onSkip(block.id); selected = null },
+            onReopen = { onReopen(block.id); selected = null },
         )
     }
 }

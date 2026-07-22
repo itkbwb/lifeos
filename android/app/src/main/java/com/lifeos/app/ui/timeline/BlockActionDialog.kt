@@ -44,6 +44,7 @@ fun BlockActionDialog(
     onResume: () -> Unit,
     onComplete: () -> Unit,
     onSkip: () -> Unit,
+    onReopen: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -75,6 +76,9 @@ fun BlockActionDialog(
                     }
                     "paused" -> {
                         Button(onClick = onResume) { Text("Продолжить") }
+                    }
+                    "completed", "skipped", "cancelled" -> {
+                        OutlinedButton(onClick = onReopen) { Text("Вернуть в план") }
                     }
                     else -> {}
                 }

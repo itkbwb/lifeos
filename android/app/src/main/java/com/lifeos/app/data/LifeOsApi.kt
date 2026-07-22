@@ -36,6 +36,9 @@ interface LifeOsApi {
     @POST("api/blocks/{id}/restart")
     suspend fun restartBlock(@Path("id") id: Int): Block
 
+    @POST("api/blocks/{id}/reopen")
+    suspend fun reopenBlock(@Path("id") id: Int): Block
+
     @POST("api/blocks/{id}/pause")
     suspend fun pauseBlock(@Path("id") id: Int): Block
 

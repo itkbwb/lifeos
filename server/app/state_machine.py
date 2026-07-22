@@ -246,6 +246,32 @@ def cancel_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBl
     return block
 
 
+def reopen_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBlock:
+    """Undoes a completed/skipped/cancelled mark that shouldn't have
+    happened (mis-tap, stale test data, etc.), returning the block to plain
+    "planned" so it can be started normally again. Doesn't touch the old
+    WorkSession - starting again creates a fresh one, the old one just stops
+    counting toward "actual" totals once a new session supersedes it."""
+    if block.status == BlockStatus.PLANNED.value:
+        return block  # idempotent
+
+    if block.status not in {
+        BlockStatus.COMPLETED.value,
+        BlockStatus.SKIPPED.value,
+        BlockStatus.CANCELLED.value,
+    }:
+        raise InvalidTransitionError(f"Cannot reopen a block in status '{block.status}'")
+
+    block.status = BlockStatus.PLANNED.value
+    block.completed_at = None
+    block.skipped_at = None
+    block.cancelled_at = None
+    block.updated_at = now
+    db.commit()
+    db.refresh(block)
+    return block
+
+
 def restart_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBlock:
     """Zeroes the elapsed timer and keeps working on the same block: the
     current WorkSession is closed out (discarded from future actual-time

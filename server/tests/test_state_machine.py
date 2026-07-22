@@ -11,6 +11,7 @@ from app.state_machine import (
     cancel_block,
     complete_block,
     pause_block,
+    reopen_block,
     reschedule_block,
     restart_block,
     resume_block,
@@ -212,6 +213,47 @@ def test_reschedule_creates_linked_block(db_session, user, now):
     assert new_block.status == BlockStatus.PLANNED.value
     db_session.refresh(block)
     assert block.status == BlockStatus.RESCHEDULED.value
+
+
+def test_reopen_from_completed_clears_timestamp(db_session, user, now):
+    block = make_block(db_session, user, now=now)
+    start_block(db_session, block, now)
+    completed_at = now + timedelta(hours=1)
+    block = complete_block(db_session, block, completed_at)
+
+    reopened_at = completed_at + timedelta(minutes=5)
+    block = reopen_block(db_session, block, reopened_at)
+
+    assert block.status == BlockStatus.PLANNED.value
+    assert block.completed_at is None
+
+
+def test_reopen_from_skipped_and_cancelled(db_session, user, now):
+    skipped = make_block(db_session, user, now=now)
+    skip_block(db_session, skipped, now)
+    skipped = reopen_block(db_session, skipped, now + timedelta(minutes=1))
+    assert skipped.status == BlockStatus.PLANNED.value
+    assert skipped.skipped_at is None
+
+    cancelled = make_block(db_session, user, now=now)
+    start_block(db_session, cancelled, now)
+    cancel_block(db_session, cancelled, now + timedelta(minutes=1))
+    cancelled = reopen_block(db_session, cancelled, now + timedelta(minutes=2))
+    assert cancelled.status == BlockStatus.PLANNED.value
+    assert cancelled.cancelled_at is None
+
+
+def test_reopen_invalid_from_active(db_session, user, now):
+    block = make_block(db_session, user, now=now)
+    start_block(db_session, block, now)
+    with pytest.raises(InvalidTransitionError):
+        reopen_block(db_session, block, now)
+
+
+def test_reopen_is_idempotent_from_planned(db_session, user, now):
+    block = make_block(db_session, user, now=now)
+    reopened = reopen_block(db_session, block, now)
+    assert reopened.status == BlockStatus.PLANNED.value
 
 
 def test_effective_status_ready_is_not_persisted(db_session, user, now):
