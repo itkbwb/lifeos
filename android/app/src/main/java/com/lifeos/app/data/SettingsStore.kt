@@ -49,12 +49,13 @@ class SettingsStore(private val context: Context) {
     }
 
     fun setAccessCredentials(clientId: String, clientSecret: String) {
-        android.util.Log.e("LifeOS", "setAccessCredentials id_len=${clientId.length} secret_len=${clientSecret.length}")
+        // Synchronous commit (not apply()): callers - including the adb
+        // provisioning path - refresh immediately afterward, so the write
+        // must be durable before we return, not merely queued.
         securePrefs.edit()
             .putString(KEY_CLIENT_ID, clientId)
             .putString(KEY_CLIENT_SECRET, clientSecret)
             .commit()
-            .also { android.util.Log.e("LifeOS", "securePrefs.commit() success=$it") }
         _accessClientId.value = clientId
         _accessClientSecret.value = clientSecret
     }
