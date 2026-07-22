@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Generator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .database import SessionLocal
@@ -112,13 +112,11 @@ def _planned_minutes(block: ScheduleBlock) -> int:
     return max(0, int((block.planned_end - block.planned_start).total_seconds() // 60))
 
 
-def _active_or_paused_block(
-    db: Session, user: User, blocks: list[ScheduleBlock]
-) -> Optional[ScheduleBlock]:
+def _active_or_paused_block(db: Session, user: User) -> Optional[ScheduleBlock]:
     """Whatever the user is actually working on (or has paused) right now,
-    regardless of whether its planned slot happens to match the clock - a
-    block started out of its original window is what "Сейчас" should show,
-    not whatever the schedule says should be happening."""
+    regardless of which day it was originally planned for or whether its
+    slot happens to match the clock - starting a task from any day (not just
+    today's list) must still make it show up here."""
     session = db.scalar(
         select(WorkSession).where(
             WorkSession.user_id == user.id,
@@ -128,21 +126,7 @@ def _active_or_paused_block(
     )
     if session is None:
         return None
-    return next((b for b in blocks if b.id == session.schedule_block_id), None)
-
-
-def _queue_anchor_end(db: Session, user: User, now: datetime) -> datetime:
-    """End of the last thing on the user's plate right now - the active/
-    paused block or the latest not-yet-done queued block - so queuing
-    stacks tasks one after another instead of overlapping them."""
-    latest = db.scalar(
-        select(func.max(ScheduleBlock.planned_end)).where(
-            ScheduleBlock.user_id == user.id,
-            ScheduleBlock.status.notin_(("skipped", "cancelled", "rescheduled", "completed")),
-            ScheduleBlock.planned_end >= now,
-        )
-    )
-    return latest if latest is not None else now
+    return db.get(ScheduleBlock, session.schedule_block_id)
 
 
 @app.get("/api/now")
@@ -154,7 +138,7 @@ def get_now(
     today_local = now_aware.astimezone(APP_TZ).date()
     blocks = _get_day_blocks(db, user, today_local)
 
-    current_block = _active_or_paused_block(db, user, blocks)
+    current_block = _active_or_paused_block(db, user)
     if current_block is None:
         current_block = next(
             (
@@ -463,8 +447,10 @@ def action_queue(
 ):
     block = _get_block(db, user, block_id)
     now = now_utc()
-    anchor_end = _queue_anchor_end(db, user, now)
-    new_start = anchor_end + timedelta(minutes=payload.break_minutes)
+    # Queueing means "run this soon, after a short break" - not "shove it to
+    # wherever the tail end of the whole multi-week seeded plan happens to
+    # be", which is what anchoring off other blocks' planned_end used to do.
+    new_start = now + timedelta(minutes=payload.break_minutes)
     duration = block.planned_end - block.planned_start
     new_end = new_start + duration
     try:

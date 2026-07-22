@@ -1,7 +1,7 @@
 package com.lifeos.app.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -61,56 +61,59 @@ fun DayScreen(
     val day: LocalDate = remember(plan.date) { LocalDate.parse(plan.date) }
     val totalHeight = (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * com.lifeos.app.ui.timeline.HOUR_HEIGHT_DP
 
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = { onNavigateDate(day.minusDays(1).toString()) }) {
-            Icon(Icons.Filled.ChevronLeft, contentDescription = "Предыдущий день")
-        }
-        val weekday = day.dayOfWeek.getDisplayName(TextStyle.FULL, Locale("ru"))
-            .replaceFirstChar { it.uppercase() }
-        Text(
-            text = "$weekday, ${day.format(dayTitleFormatter)}",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-        )
-        IconButton(onClick = { onNavigateDate(day.plusDays(1).toString()) }) {
-            Icon(Icons.Filled.ChevronRight, contentDescription = "Следующий день")
-        }
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(8.dp),
-    ) {
-        HourGutter(TIMELINE_START_HOUR, TIMELINE_END_HOUR)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(totalHeight.dp)
-                .padding(start = 6.dp),
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
         ) {
-            for (block in plan.blocks) {
-                val startMin = minutesFromDayStart(block.display_start, day)
-                val endMin = minutesFromDayStart(block.display_end, day)
-                val topDp = dpForMinutes(startMin)
-                val heightDp = dpForMinutes((endMin - startMin).coerceAtLeast(1))
-                TimelineBlockCard(
-                    block = block,
-                    heightDp = heightDp,
-                    compact = false,
-                    onClick = { selected = block },
-                    modifier = Modifier.offset(y = topDp.dp),
-                )
+            IconButton(onClick = { onNavigateDate(day.minusDays(1).toString()) }) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "Предыдущий день")
             }
-            val nowMin = nowMinutesFromDayStart(day)
-            if (nowMin in 0..(24 * 60)) {
-                NowLine(modifier = Modifier.offset(y = dpForMinutes(nowMin).dp))
+            val weekday = day.dayOfWeek.getDisplayName(TextStyle.FULL, Locale("ru"))
+                .replaceFirstChar { it.uppercase() }
+            Text(
+                text = "$weekday, ${day.format(dayTitleFormatter)}",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+            )
+            IconButton(onClick = { onNavigateDate(day.plusDays(1).toString()) }) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Следующий день")
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(8.dp),
+        ) {
+            HourGutter(TIMELINE_START_HOUR, TIMELINE_END_HOUR)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(totalHeight.dp)
+                    .padding(start = 6.dp),
+            ) {
+                for (block in plan.blocks) {
+                    val startMin = minutesFromDayStart(block.display_start, day)
+                    val endMin = minutesFromDayStart(block.display_end, day)
+                    val topDp = dpForMinutes(startMin)
+                    val heightDp = dpForMinutes((endMin - startMin).coerceAtLeast(1))
+                    TimelineBlockCard(
+                        block = block,
+                        heightDp = heightDp,
+                        compact = false,
+                        onClick = { selected = block },
+                        modifier = Modifier.offset(y = topDp.dp),
+                    )
+                }
+                val nowMin = nowMinutesFromDayStart(day)
+                if (nowMin in 0..(24 * 60)) {
+                    NowLine(modifier = Modifier.offset(y = dpForMinutes(nowMin).dp))
+                }
             }
         }
     }
