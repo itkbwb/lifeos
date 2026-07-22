@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -35,8 +36,11 @@ fun NowScreen(
     onComplete: (Int) -> Unit,
     onSkip: (Int) -> Unit,
     onReschedule: (Int) -> Unit,
+    onRestart: (Int) -> Unit,
+    onSwitchTask: () -> Unit,
 ) {
     var tickMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var countdown by remember { mutableStateOf(false) }
     LaunchedEffect(state) {
         while (true) {
             delay(1000)
@@ -70,8 +74,12 @@ fun NowScreen(
                     block = state.block,
                     elapsedSeconds = elapsedNow,
                     plannedSeconds = state.block.planned_duration_minutes * 60,
+                    countdown = countdown,
+                    onToggleCountdown = { countdown = !countdown },
                     onPause = { onPause(state.block.id) },
                     onComplete = { onComplete(state.block.id) },
+                    onRestart = { onRestart(state.block.id) },
+                    onSwitchTask = onSwitchTask,
                 )
             }
 
@@ -79,6 +87,8 @@ fun NowScreen(
                 block = state.block,
                 pausedSeconds = state.session.elapsed_seconds,
                 onResume = { onResume(state.block.id) },
+                onRestart = { onRestart(state.block.id) },
+                onSwitchTask = onSwitchTask,
             )
 
             is NowUiState.Completed -> CompletedCard(state.block)

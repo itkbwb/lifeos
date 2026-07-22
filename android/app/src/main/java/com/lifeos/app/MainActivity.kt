@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
@@ -23,6 +24,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -44,6 +47,7 @@ import com.lifeos.app.ui.DayScreen
 import com.lifeos.app.ui.NowScreen
 import com.lifeos.app.ui.ProjectsScreen
 import com.lifeos.app.ui.SettingsScreen
+import com.lifeos.app.ui.WeekScreen
 import com.lifeos.app.ui.theme.LifeOsTheme
 import com.lifeos.app.ui.toUiState
 import com.lifeos.app.update.UpdateChecker
@@ -107,6 +111,7 @@ private fun LifeOsRoot(
     val navController = rememberNavController()
     val nowState by viewModel.nowState.collectAsState()
     val dayPlan by viewModel.dayPlan.collectAsState()
+    val weekPlans by viewModel.weekPlans.collectAsState()
     val projects by viewModel.projects.collectAsState()
     val serverUrl by viewModel.serverUrl.collectAsState()
     val accessClientId by viewModel.accessClientId.collectAsState()
@@ -200,6 +205,11 @@ private fun LifeOsRoot(
                                     viewModel.rescheduleBlock(id, start.toString(), end.toString())
                                 }
                             },
+                            onRestart = viewModel::restartBlock,
+                            onSwitchTask = {
+                                navController.navigate("plan")
+                                viewModel.refreshDayPlan()
+                            },
                         )
                         is ConnectionState.NoConnection -> CenteredMessage("Нет соединения")
                         is ConnectionState.ServerUnavailable -> CenteredMessage("Сервер недоступен")
@@ -207,18 +217,51 @@ private fun LifeOsRoot(
                     }
                 }
                 composable("plan") {
-                    val plan = dayPlan
-                    if (plan != null) {
-                        DayScreen(
-                            blocks = plan.blocks,
-                            onStart = viewModel::startBlock,
-                            onPause = viewModel::pauseBlock,
-                            onResume = viewModel::resumeBlock,
-                            onComplete = viewModel::completeBlock,
-                            onSkip = viewModel::skipBlock,
-                        )
-                    } else {
-                        CenteredProgress()
+                    var planTab by remember { mutableStateOf(0) }
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        TabRow(selectedTabIndex = planTab) {
+                            Tab(
+                                selected = planTab == 0,
+                                onClick = { planTab = 0 },
+                                text = { Text("День") },
+                            )
+                            Tab(
+                                selected = planTab == 1,
+                                onClick = {
+                                    planTab = 1
+                                    viewModel.refreshWeekPlan()
+                                },
+                                text = { Text("Неделя") },
+                            )
+                        }
+                        if (planTab == 0) {
+                            val plan = dayPlan
+                            if (plan != null) {
+                                DayScreen(
+                                    plan = plan,
+                                    onStart = viewModel::startBlock,
+                                    onPause = viewModel::pauseBlock,
+                                    onResume = viewModel::resumeBlock,
+                                    onComplete = viewModel::completeBlock,
+                                    onSkip = viewModel::skipBlock,
+                                )
+                            } else {
+                                CenteredProgress()
+                            }
+                        } else {
+                            if (weekPlans.isNotEmpty()) {
+                                WeekScreen(
+                                    plans = weekPlans,
+                                    onStart = viewModel::startBlock,
+                                    onPause = viewModel::pauseBlock,
+                                    onResume = viewModel::resumeBlock,
+                                    onComplete = viewModel::completeBlock,
+                                    onSkip = viewModel::skipBlock,
+                                )
+                            } else {
+                                CenteredProgress()
+                            }
+                        }
                     }
                 }
                 composable("projects") {

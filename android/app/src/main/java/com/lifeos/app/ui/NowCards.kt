@@ -21,6 +21,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -110,28 +111,53 @@ fun ActiveCard(
     block: Block,
     elapsedSeconds: Int,
     plannedSeconds: Int,
+    countdown: Boolean,
+    onToggleCountdown: () -> Unit,
     onPause: () -> Unit,
     onComplete: () -> Unit,
+    onRestart: () -> Unit,
+    onSwitchTask: () -> Unit,
 ) {
     AccentedCard(accent = Lavender300) {
         StateLabel("В РАБОТЕ", color = Lavender300)
         Spacer(Modifier.height(8.dp))
         BlockHeading(block)
         Spacer(Modifier.height(20.dp))
+
+        val remaining = plannedSeconds - elapsedSeconds
+        val displaySeconds = if (countdown) remaining else elapsedSeconds
+        val overtime = countdown && remaining < 0
+
         Text(
-            text = formatHms(elapsedSeconds),
+            text = (if (overtime) "+" else "") + formatHms(kotlin.math.abs(displaySeconds)),
             fontSize = 52.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = if (overtime) Lavender500 else MaterialTheme.colorScheme.onSurface,
         )
-        Text(text = "из запланированных ${formatHms(plannedSeconds)}", fontSize = 13.sp, color = Lavender300)
-        Spacer(Modifier.height(20.dp))
+        Row {
+            Text(
+                text = if (countdown) "осталось из ${formatHms(plannedSeconds)}" else "из запланированных ${formatHms(plannedSeconds)}",
+                fontSize = 13.sp,
+                color = Lavender300,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        TextButton(onClick = onToggleCountdown, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+            Text(if (countdown) "Показать прошедшее" else "Показать обратный отсчёт", fontSize = 12.sp)
+        }
+
+        Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = onPause) { Text("Пауза") }
             Button(
                 onClick = onComplete,
                 colors = ButtonDefaults.buttonColors(containerColor = Lavender500, contentColor = Color(0xFF09080D)),
             ) { Text("Завершить") }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextButton(onClick = onRestart) { Text("Начать заново") }
+            TextButton(onClick = onSwitchTask) { Text("Сменить задачу") }
         }
     }
 }
@@ -141,6 +167,8 @@ fun PausedCard(
     block: Block,
     pausedSeconds: Int,
     onResume: () -> Unit,
+    onRestart: () -> Unit,
+    onSwitchTask: () -> Unit,
 ) {
     AccentedCard(accent = Lavender200) {
         StateLabel("НА ПАУЗЕ", color = Lavender200)
@@ -153,6 +181,11 @@ fun PausedCard(
             onClick = onResume,
             colors = ButtonDefaults.buttonColors(containerColor = Lavender500, contentColor = Color(0xFF09080D)),
         ) { Text("Продолжить") }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextButton(onClick = onRestart) { Text("Начать заново") }
+            TextButton(onClick = onSwitchTask) { Text("Сменить задачу") }
+        }
     }
 }
 

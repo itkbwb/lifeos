@@ -19,6 +19,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 import java.io.IOException
+import java.time.DayOfWeek
+import java.time.LocalDate
 
 private const val POLL_INTERVAL_MS = 20_000L
 
@@ -37,6 +39,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _dayPlan = MutableStateFlow<DayPlan?>(null)
     val dayPlan: StateFlow<DayPlan?> = _dayPlan
+
+    private val _weekPlans = MutableStateFlow<List<DayPlan>>(emptyList())
+    val weekPlans: StateFlow<List<DayPlan>> = _weekPlans
 
     private val _projects = MutableStateFlow<List<ProjectStat>>(emptyList())
     val projects: StateFlow<List<ProjectStat>> = _projects
@@ -101,6 +106,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshWeekPlan(anchorDate: String? = null) {
+        viewModelScope.launch {
+            try {
+                val anchor = anchorDate?.let { LocalDate.parse(it) } ?: LocalDate.now()
+                val monday = anchor.with(DayOfWeek.MONDAY)
+                val dates = (0 until 7).map { monday.plusDays(it.toLong()).toString() }
+                val plans = withContext(Dispatchers.IO) {
+                    val api = buildApi()
+                    dates.map { date -> api.getDayPlan(date) }
+                }
+                _weekPlans.value = plans
+            } catch (_: Exception) {
+                // Week screen keeps showing its last known data.
+            }
+        }
+    }
+
     fun refreshProjects() {
         viewModelScope.launch {
             try {
@@ -125,6 +147,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startBlock(id: Int) = act(id) { startBlock(it) }
+    fun restartBlock(id: Int) = act(id) { restartBlock(it) }
     fun pauseBlock(id: Int) = act(id) { pauseBlock(it) }
     fun resumeBlock(id: Int) = act(id) { resumeBlock(it) }
     fun completeBlock(id: Int) = act(id) { completeBlock(it) }
