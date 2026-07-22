@@ -12,6 +12,7 @@ from app.state_machine import (
     complete_block,
     pause_block,
     reschedule_block,
+    restart_block,
     resume_block,
     skip_block,
     start_block,
@@ -47,13 +48,77 @@ def test_start_invalid_from_completed(db_session, user, now):
         start_block(db_session, block, now)
 
 
-def test_start_conflict_when_another_block_active(db_session, user, now):
+def test_start_another_block_auto_pauses_the_first(db_session, user, now):
     block_a = make_block(db_session, user, now=now)
     block_b = make_block(db_session, user, now=now)
 
     start_block(db_session, block_a, now)
-    with pytest.raises(ActiveSessionConflictError):
-        start_block(db_session, block_b, now)
+    switch_at = now + timedelta(minutes=5)
+    start_block(db_session, block_b, switch_at)
+
+    db_session.refresh(block_a)
+    db_session.refresh(block_b)
+    assert block_a.status == BlockStatus.PAUSED.value
+    assert block_b.status == BlockStatus.ACTIVE.value
+
+    # Only one truly active session, but block_a's stays open (paused).
+    session_a = db_session.scalar(select(WorkSession).where(WorkSession.schedule_block_id == block_a.id))
+    session_b = db_session.scalar(select(WorkSession).where(WorkSession.schedule_block_id == block_b.id))
+    assert session_a.status == "paused"
+    assert session_a.ended_at is None
+    assert session_b.status == "active"
+
+
+def test_db_rejects_two_active_sessions_for_same_user(db_session, user, now):
+    # The partial unique index is the last line of defense against a real
+    # race (two starts landing in the same instant) that the auto-pause
+    # pre-check in start_block() can't fully rule out.
+    block_a = make_block(db_session, user, now=now)
+    block_b = make_block(db_session, user, now=now)
+    db_session.add(
+        WorkSession(
+            schedule_block_id=block_a.id, user_id=user.id, started_at=now,
+            status="active", created_at=now, updated_at=now,
+        )
+    )
+    db_session.commit()
+
+    db_session.add(
+        WorkSession(
+            schedule_block_id=block_b.id, user_id=user.id, started_at=now,
+            status="active", created_at=now, updated_at=now,
+        )
+    )
+    with pytest.raises(Exception):
+        db_session.commit()
+    db_session.rollback()
+
+
+def test_restart_resets_elapsed_and_discards_old_session(db_session, user, now):
+    block = make_block(db_session, user, now=now)
+    start_block(db_session, block, now)
+
+    restart_at = now + timedelta(minutes=10)
+    block = restart_block(db_session, block, restart_at)
+
+    assert block.status == BlockStatus.ACTIVE.value
+    sessions = list(
+        db_session.scalars(
+            select(WorkSession).where(WorkSession.schedule_block_id == block.id).order_by(WorkSession.started_at)
+        )
+    )
+    assert len(sessions) == 2
+    assert sessions[0].status == "restarted"
+    assert sessions[0].ended_at == restart_at
+    assert sessions[1].status == "active"
+    assert sessions[1].started_at == restart_at
+    assert sessions[1].ended_at is None
+
+
+def test_restart_invalid_from_planned(db_session, user, now):
+    block = make_block(db_session, user, now=now)
+    with pytest.raises(InvalidTransitionError):
+        restart_block(db_session, block, now)
 
 
 def test_pause_resume_cycle(db_session, user, now):

@@ -27,6 +27,7 @@ from .state_machine import (
     complete_block,
     pause_block,
     reschedule_block,
+    restart_block,
     resume_block,
     skip_block,
     start_block,
@@ -133,9 +134,17 @@ def get_now(
         None,
     )
 
-    active_session = db.scalar(
-        select(WorkSession).where(WorkSession.user_id == user.id, WorkSession.ended_at.is_(None))
-    )
+    # Scoped to current_block specifically (not "any open session for the
+    # user") - switching to a different task can leave this block paused
+    # with its own open session, and that's what the UI needs to show.
+    active_session = None
+    if current_block is not None:
+        active_session = db.scalar(
+            select(WorkSession).where(
+                WorkSession.schedule_block_id == current_block.id,
+                WorkSession.ended_at.is_(None),
+            )
+        )
 
     minutes_late_starting = 0
     if current_block is not None and current_block.status == "planned" and active_session is None:
@@ -358,6 +367,14 @@ def action_complete(block_id: int, user: User = Depends(get_current_user), db: S
     block = _get_block(db, user, block_id)
     now = now_utc()
     block = _run_transition(complete_block, db, block, now)
+    return serialize_block(db, block, now)
+
+
+@app.post("/api/blocks/{block_id}/restart")
+def action_restart(block_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    block = _get_block(db, user, block_id)
+    now = now_utc()
+    block = _run_transition(restart_block, db, block, now)
     return serialize_block(db, block, now)
 
 

@@ -102,10 +102,10 @@ class WorkSession(Base):
     __tablename__ = "work_sessions"
     __table_args__ = (
         Index(
-            "ux_work_sessions_one_open_per_user",
+            "ux_work_sessions_one_active_per_user",
             "user_id",
             unique=True,
-            sqlite_where=text("ended_at IS NULL"),
+            sqlite_where=text("status = 'active' AND ended_at IS NULL"),
         ),
     )
 

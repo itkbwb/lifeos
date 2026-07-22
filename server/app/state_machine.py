@@ -49,6 +49,16 @@ def _open_pause(db: Session, session: WorkSession) -> PauseEvent | None:
     )
 
 
+def _active_session(db: Session, user_id: int) -> WorkSession | None:
+    return db.scalar(
+        select(WorkSession).where(
+            WorkSession.user_id == user_id,
+            WorkSession.status == "active",
+            WorkSession.ended_at.is_(None),
+        )
+    )
+
+
 def start_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBlock:
     if block.status == BlockStatus.ACTIVE.value:
         return block  # idempotent: already started
@@ -56,14 +66,16 @@ def start_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBlo
     if block.status != BlockStatus.PLANNED.value:
         raise InvalidTransitionError(f"Cannot start a block in status '{block.status}'")
 
-    other_open = db.scalar(
-        select(WorkSession).where(
-            WorkSession.user_id == block.user_id,
-            WorkSession.ended_at.is_(None),
-        )
-    )
-    if other_open is not None and other_open.schedule_block_id != block.id:
-        raise ActiveSessionConflictError(other_open.id)
+    # Switching tasks: starting a new block while another is active pauses
+    # the other one rather than erroring - the user explicitly chose to
+    # switch, this isn't a race. Only a genuine double-tap race (two starts
+    # for two different blocks landing in the same instant) falls through
+    # to the IntegrityError/409 path below.
+    other_active = _active_session(db, block.user_id)
+    if other_active is not None and other_active.schedule_block_id != block.id:
+        other_block = db.get(ScheduleBlock, other_active.schedule_block_id)
+        if other_block is not None:
+            pause_block(db, other_block, now)
 
     session = WorkSession(
         schedule_block_id=block.id,
@@ -81,12 +93,7 @@ def start_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBlo
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        conflict = db.scalar(
-            select(WorkSession).where(
-                WorkSession.user_id == block.user_id,
-                WorkSession.ended_at.is_(None),
-            )
-        )
+        conflict = _active_session(db, block.user_id)
         if conflict is not None:
             raise ActiveSessionConflictError(conflict.id) from exc
         raise
@@ -233,6 +240,39 @@ def cancel_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBl
 
     block.status = BlockStatus.CANCELLED.value
     block.cancelled_at = now
+    block.updated_at = now
+    db.commit()
+    db.refresh(block)
+    return block
+
+
+def restart_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBlock:
+    """Zeroes the elapsed timer and keeps working on the same block: the
+    current WorkSession is closed out (discarded from future actual-time
+    totals, which always look at the most recent session per block) and a
+    fresh one starts immediately."""
+    if block.status not in {BlockStatus.ACTIVE.value, BlockStatus.PAUSED.value}:
+        raise InvalidTransitionError(f"Cannot restart a block in status '{block.status}'")
+
+    old_session = _open_session(db, block)
+    if old_session is not None:
+        pause = _open_pause(db, old_session)
+        if pause is not None:
+            pause.ended_at = now
+        old_session.ended_at = now
+        old_session.status = "restarted"
+        old_session.updated_at = now
+
+    new_session = WorkSession(
+        schedule_block_id=block.id,
+        user_id=block.user_id,
+        started_at=now,
+        status="active",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(new_session)
+    block.status = BlockStatus.ACTIVE.value
     block.updated_at = now
     db.commit()
     db.refresh(block)
