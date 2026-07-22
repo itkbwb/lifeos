@@ -9,6 +9,8 @@ data class Block(
     val description: String?,
     val planned_start: String,
     val planned_end: String,
+    val display_start: String,
+    val display_end: String,
     val planned_duration_minutes: Int,
     val stored_status: String,
     val status: String,

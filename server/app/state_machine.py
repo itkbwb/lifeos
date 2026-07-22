@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import PauseEvent, ScheduleBlock, WorkSession
+from .serializers import elapsed_seconds, paused_seconds
 from .status import BlockStatus
 
 TERMINAL_STATUSES = {
@@ -66,14 +67,10 @@ def start_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBlo
     if block.status != BlockStatus.PLANNED.value:
         raise InvalidTransitionError(f"Cannot start a block in status '{block.status}'")
 
-    # Starting a block outside its originally planned window moves it to
-    # start now (same duration) - otherwise "Сейчас" and the calendar would
-    # keep showing the stale original slot while the real work happens
-    # somewhere else on the timeline.
-    if not (block.planned_start <= now < block.planned_end):
-        duration = block.planned_end - block.planned_start
-        block.planned_start = now
-        block.planned_end = now + duration
+    # The plan is never mutated by starting a block - what actually happened
+    # (this WorkSession's real start/end) is a separate "fact" layer that the
+    # serializer overlays on top of the unchanged plan. See pause_block() for
+    # what happens when a block gets started outside its own planned window.
 
     # Switching tasks: starting a new block while another is active pauses
     # the other one rather than erroring - the user explicitly chose to
@@ -127,6 +124,47 @@ def pause_block(db: Session, block: ScheduleBlock, now: datetime) -> ScheduleBlo
 
     session.status = "paused"
     session.updated_at = now
+
+    # Opportunistic work: this session was started outside the block's own
+    # planned window (e.g. worked on tomorrow's task today) and is being
+    # deferred, not finished. Split it: the worked time becomes its own
+    # standalone record at the real time it happened (so it stays visible
+    # once the session's fact-time display would otherwise fully replace the
+    # original block's plan-time display), and the remainder of the original
+    # plan shrinks by however much was actually worked.
+    if not (block.planned_start <= session.started_at < block.planned_end):
+        worked = elapsed_seconds(session, now, paused_seconds(db, session, now))
+        original_duration = (block.planned_end - block.planned_start).total_seconds()
+
+        fact_block = ScheduleBlock(
+            user_id=block.user_id,
+            project_id=block.project_id,
+            block_type=block.block_type,
+            title=block.title,
+            description=block.description,
+            planned_start=session.started_at,
+            planned_end=now,
+            status=BlockStatus.PAUSED.value,
+            created_at=now,
+            updated_at=now,
+            rescheduled_from_id=block.id,
+        )
+        db.add(fact_block)
+        db.flush()
+        session.schedule_block_id = fact_block.id
+
+        if worked >= original_duration:
+            block.status = BlockStatus.CANCELLED.value
+            block.cancelled_at = now
+        else:
+            block.planned_end = block.planned_start + timedelta(seconds=original_duration - worked)
+            block.status = BlockStatus.PLANNED.value
+
+        block.updated_at = now
+        db.commit()
+        db.refresh(block)
+        return block
+
     block.status = BlockStatus.PAUSED.value
     block.updated_at = now
     db.commit()

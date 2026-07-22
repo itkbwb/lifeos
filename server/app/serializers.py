@@ -39,8 +39,24 @@ def elapsed_seconds(session: WorkSession, now: datetime, paused: int) -> int:
     return max(0, int(raw) - paused)
 
 
+def effective_interval(db: Session, block: ScheduleBlock, now: datetime) -> tuple[datetime, datetime]:
+    """What actually happened, for display - falls back to the plan for a
+    block nobody has touched yet. A block's own planned_start/planned_end are
+    never mutated by working on it; this is the only place "fact" overrides
+    "plan" for rendering."""
+    session = db.scalar(
+        select(WorkSession)
+        .where(WorkSession.schedule_block_id == block.id)
+        .order_by(WorkSession.started_at.desc())
+    )
+    if session is None:
+        return block.planned_start, block.planned_end
+    return session.started_at, (session.ended_at or now)
+
+
 def serialize_block(db: Session, block: ScheduleBlock, now: datetime) -> dict:
     effective = effective_status(block, now)
+    display_start, display_end = effective_interval(db, block, now)
     return {
         "id": block.id,
         "project_id": block.project_id,
@@ -50,6 +66,8 @@ def serialize_block(db: Session, block: ScheduleBlock, now: datetime) -> dict:
         "description": block.description,
         "planned_start": block.planned_start.isoformat(),
         "planned_end": block.planned_end.isoformat(),
+        "display_start": display_start.isoformat(),
+        "display_end": display_end.isoformat(),
         "planned_duration_minutes": _duration_minutes(block.planned_start, block.planned_end),
         "stored_status": block.status,
         "status": effective,

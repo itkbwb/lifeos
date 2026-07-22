@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.Block
+import com.lifeos.app.data.BlockUpdateRequest
 import com.lifeos.app.data.DayPlan
 import com.lifeos.app.data.LifeOsApi
 import com.lifeos.app.data.NowResponse
@@ -174,6 +175,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 withContext(Dispatchers.IO) {
                     buildApi().queueBlock(id, QueueRequest(breakMinutes))
+                }
+            } catch (_: Exception) {
+            }
+            refreshNow(showLoading = false)
+            refreshDayPlan()
+        }
+    }
+
+    fun updateBlockTime(id: Int, plannedStart: String, plannedEnd: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    buildApi().updateBlock(id, BlockUpdateRequest(planned_start = plannedStart, planned_end = plannedEnd))
                 }
             } catch (_: Exception) {
             }

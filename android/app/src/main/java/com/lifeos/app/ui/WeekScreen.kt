@@ -57,6 +57,7 @@ fun WeekScreen(
     onSkip: (Int) -> Unit,
     onReopen: (Int) -> Unit,
     onQueue: (Int, Int) -> Unit,
+    onUpdateTime: (Int, String, String) -> Unit,
 ) {
     if (plans.isEmpty()) return
 
@@ -115,8 +116,8 @@ fun WeekScreen(
                                 .padding(horizontal = 2.dp),
                         ) {
                             for (block in plan.blocks) {
-                                val startMin = minutesFromDayStart(block.planned_start, day)
-                                val endMin = minutesFromDayStart(block.planned_end, day)
+                                val startMin = minutesFromDayStart(block.display_start, day)
+                                val endMin = minutesFromDayStart(block.display_end, day)
                                 val topDp = dpForMinutes(startMin)
                                 val heightDp = dpForMinutes((endMin - startMin).coerceAtLeast(1))
                                 TimelineBlockCard(
@@ -150,6 +151,7 @@ fun WeekScreen(
             onSkip = { onSkip(block.id); selected = null },
             onReopen = { onReopen(block.id); selected = null },
             onQueue = { minutes -> onQueue(block.id, minutes); selected = null },
+            onUpdateTime = { start, end -> onUpdateTime(block.id, start, end); selected = null },
         )
     }
 }

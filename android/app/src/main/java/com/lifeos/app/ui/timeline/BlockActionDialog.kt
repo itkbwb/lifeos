@@ -6,10 +6,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -22,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lifeos.app.data.Block
 import com.lifeos.app.ui.theme.Lavender300
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
@@ -30,6 +33,12 @@ private val breakPresetsMinutes = listOf(0, 5, 10, 15, 30)
 
 fun formatLocalTime(iso: String): String =
     OffsetDateTime.parse(iso).atZoneSameInstant(SEOUL).format(timeFormatter)
+
+private fun combineWithLocalTime(baseIso: String, hhmm: String): String? {
+    val time = runCatching { LocalTime.parse(hhmm, timeFormatter) }.getOrNull() ?: return null
+    val baseDate = OffsetDateTime.parse(baseIso).atZoneSameInstant(SEOUL).toLocalDate()
+    return baseDate.atTime(time).atZone(SEOUL).toOffsetDateTime().toString()
+}
 
 val statusLabels = mapOf(
     "ready" to "Пора начинать",
@@ -53,17 +62,35 @@ fun BlockActionDialog(
     onSkip: () -> Unit,
     onReopen: () -> Unit,
     onQueue: (breakMinutes: Int) -> Unit,
+    onUpdateTime: (plannedStart: String, plannedEnd: String) -> Unit,
 ) {
     var pickingBreak by remember { mutableStateOf(false) }
+    var pickingTime by remember { mutableStateOf(false) }
+    var startText by remember { mutableStateOf(formatLocalTime(block.planned_start)) }
+    var endText by remember { mutableStateOf(formatLocalTime(block.planned_end)) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(block.title, fontWeight = FontWeight.Bold) },
         text = {
-            if (pickingBreak) {
-                Text("Сколько отдыха дать перед этой задачей?")
-            } else {
-                Column {
+            when {
+                pickingBreak -> Text("Сколько отдыха дать перед этой задачей?")
+                pickingTime -> Row {
+                    OutlinedTextField(
+                        value = startText,
+                        onValueChange = { startText = it },
+                        label = { Text("Начало") },
+                        modifier = Modifier.width(110.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    OutlinedTextField(
+                        value = endText,
+                        onValueChange = { endText = it },
+                        label = { Text("Конец") },
+                        modifier = Modifier.width(110.dp),
+                    )
+                }
+                else -> Column {
                     Text("${formatLocalTime(block.planned_start)}–${formatLocalTime(block.planned_end)}")
                     if (block.project_name != null) {
                         Spacer(Modifier.height(4.dp))
@@ -78,8 +105,8 @@ fun BlockActionDialog(
             }
         },
         confirmButton = {
-            if (pickingBreak) {
-                Row(
+            when {
+                pickingBreak -> Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                 ) {
@@ -89,11 +116,18 @@ fun BlockActionDialog(
                         }
                     }
                 }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pickingTime -> Button(onClick = {
+                    val newStart = combineWithLocalTime(block.planned_start, startText)
+                    val newEnd = combineWithLocalTime(block.planned_end, endText)
+                    if (newStart != null && newEnd != null) {
+                        onUpdateTime(newStart, newEnd)
+                    }
+                }) { Text("Сохранить") }
+                else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     when (block.status) {
                         "planned", "ready" -> {
                             OutlinedButton(onClick = onSkip) { Text("Пропустить") }
+                            OutlinedButton(onClick = { pickingTime = true }) { Text("Изменить время") }
                             OutlinedButton(onClick = { pickingBreak = true }) { Text("В очередь") }
                             Button(onClick = onStart) { Text("Начать") }
                         }

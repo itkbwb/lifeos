@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
-from app.models import PauseEvent, WorkSession
+from app.models import PauseEvent, ScheduleBlock, WorkSession
 from app.state import effective_status, is_overdue
 from app.state_machine import (
     ActiveSessionConflictError,
@@ -49,7 +49,7 @@ def test_start_invalid_from_completed(db_session, user, now):
         start_block(db_session, block, now)
 
 
-def test_start_outside_window_moves_block_to_now(db_session, user, now):
+def test_start_never_mutates_the_plan(db_session, user, now):
     later = now + timedelta(hours=3)
     block = make_block(
         db_session, user,
@@ -57,18 +57,9 @@ def test_start_outside_window_moves_block_to_now(db_session, user, now):
     )
     updated = start_block(db_session, block, later)
 
-    assert updated.planned_start == later
-    assert updated.planned_end == later + timedelta(hours=1)  # duration preserved
-
-
-def test_start_inside_window_leaves_schedule_untouched(db_session, user, now):
-    block = make_block(
-        db_session, user,
-        planned_start=now, planned_end=now + timedelta(hours=1), now=now,
-    )
-    started_at = now + timedelta(minutes=10)  # still within the window
-    updated = start_block(db_session, block, started_at)
-
+    # Starting outside the block's own window doesn't touch the plan at all -
+    # "fact" (the WorkSession's real times) is a display-only overlay computed
+    # by serializers.effective_interval, not a mutation of the block itself.
     assert updated.planned_start == now
     assert updated.planned_end == now + timedelta(hours=1)
 
@@ -168,6 +159,67 @@ def test_pause_invalid_when_not_active(db_session, user, now):
     block = make_block(db_session, user, now=now)
     with pytest.raises(InvalidTransitionError):
         pause_block(db_session, block, now)
+
+
+def test_pause_inside_window_does_not_split(db_session, user, now):
+    # planned_start == session.started_at == now: squarely inside the block's
+    # own window, so pausing is a plain pause - no fact/plan split.
+    block = make_block(db_session, user, now=now)
+    start_block(db_session, block, now)
+    paused_at = now + timedelta(minutes=10)
+    block = pause_block(db_session, block, paused_at)
+
+    assert block.status == BlockStatus.PAUSED.value
+    all_blocks = list(db_session.scalars(select(ScheduleBlock)))
+    assert len(all_blocks) == 1  # no fact_block created
+
+
+def test_pause_opportunistic_splits_into_fact_and_shrunk_remainder(db_session, user, now):
+    tomorrow_start = now + timedelta(days=1)
+    block = make_block(
+        db_session, user,
+        planned_start=tomorrow_start, planned_end=tomorrow_start + timedelta(hours=1),
+        now=now,
+    )
+    # Working on it *today*, well outside its own tomorrow window.
+    start_block(db_session, block, now)
+    paused_at = now + timedelta(minutes=15)
+    remainder = pause_block(db_session, block, paused_at)
+
+    # The original shrinks by the worked 15 minutes and goes back to being a
+    # plain, not-yet-started plan entry.
+    assert remainder.status == BlockStatus.PLANNED.value
+    assert remainder.planned_start == tomorrow_start
+    assert remainder.planned_end == tomorrow_start + timedelta(hours=1) - timedelta(minutes=15)
+
+    # A standalone fact record now holds the session, positioned at the real
+    # time the work happened.
+    all_blocks = list(db_session.scalars(select(ScheduleBlock)))
+    assert len(all_blocks) == 2
+    fact_block = next(b for b in all_blocks if b.id != remainder.id)
+    assert fact_block.status == BlockStatus.PAUSED.value
+    assert fact_block.rescheduled_from_id == remainder.id
+    assert fact_block.planned_start == now
+    assert fact_block.planned_end == paused_at
+
+    session = db_session.scalar(select(WorkSession).where(WorkSession.schedule_block_id == fact_block.id))
+    assert session is not None
+    assert session.status == "paused"
+
+
+def test_pause_opportunistic_worked_more_than_planned_cancels_remainder(db_session, user, now):
+    tomorrow_start = now + timedelta(days=1)
+    block = make_block(
+        db_session, user,
+        planned_start=tomorrow_start, planned_end=tomorrow_start + timedelta(minutes=10),
+        now=now,
+    )
+    start_block(db_session, block, now)
+    # Worked longer (30 min) than the whole original plan (10 min).
+    remainder = pause_block(db_session, block, now + timedelta(minutes=30))
+
+    assert remainder.status == BlockStatus.CANCELLED.value
+    assert remainder.cancelled_at is not None
 
 
 def test_complete_from_active_closes_session(db_session, user, now):
