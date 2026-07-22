@@ -28,12 +28,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _serverUrl = MutableStateFlow(SettingsStore.DEFAULT_URL)
     val serverUrl: StateFlow<String> = _serverUrl
 
+    private val _accessClientId = MutableStateFlow("")
+    val accessClientId: StateFlow<String> = _accessClientId
+
+    private val _accessClientSecret = MutableStateFlow("")
+    val accessClientSecret: StateFlow<String> = _accessClientSecret
+
     init {
         viewModelScope.launch {
             settingsStore.serverUrl.collect { url ->
                 _serverUrl.value = url
                 refresh()
             }
+        }
+        viewModelScope.launch {
+            settingsStore.accessClientId.collect { _accessClientId.value = it }
+        }
+        viewModelScope.launch {
+            settingsStore.accessClientSecret.collect { _accessClientSecret.value = it }
         }
     }
 

@@ -97,6 +97,8 @@ private fun LifeOsRoot(
     val navController = rememberNavController()
     val state by viewModel.state.collectAsState()
     val serverUrl by viewModel.serverUrl.collectAsState()
+    val accessClientId by viewModel.accessClientId.collectAsState()
+    val accessClientSecret by viewModel.accessClientSecret.collectAsState()
     var updateStatus by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -166,7 +168,10 @@ private fun LifeOsRoot(
                 composable("settings") {
                     SettingsScreen(
                         currentUrl = serverUrl,
+                        currentAccessClientId = accessClientId,
+                        currentAccessClientSecret = accessClientSecret,
                         onSave = viewModel::updateServerUrl,
+                        onSaveAccessCredentials = viewModel::provisionAccessCredentials,
                         onCheckUpdate = {
                             scope.launch {
                                 updateStatus = "Проверка…"
