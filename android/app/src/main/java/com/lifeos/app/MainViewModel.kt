@@ -78,10 +78,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val now = withContext(Dispatchers.IO) { buildApi().getNow() }
                 _nowState.value = ConnectionState.Loaded(now, fetchedAt)
             } catch (e: IOException) {
+                android.util.Log.e("LifeOS", "getNow IOException", e)
                 _nowState.value = ConnectionState.NoConnection
             } catch (e: HttpException) {
+                android.util.Log.e("LifeOS", "getNow HttpException: ${e.code()} ${e.response()?.errorBody()?.string()}", e)
                 _nowState.value = ConnectionState.ServerUnavailable
             } catch (e: Exception) {
+                android.util.Log.e("LifeOS", "getNow Exception", e)
                 _nowState.value = ConnectionState.ServerUnavailable
             }
         }
