@@ -208,7 +208,18 @@ private fun LifeOsRoot(
                 }
                 composable("plan") {
                     val plan = dayPlan
-                    if (plan != null) DayScreen(plan.blocks) else CenteredProgress()
+                    if (plan != null) {
+                        DayScreen(
+                            blocks = plan.blocks,
+                            onStart = viewModel::startBlock,
+                            onPause = viewModel::pauseBlock,
+                            onResume = viewModel::resumeBlock,
+                            onComplete = viewModel::completeBlock,
+                            onSkip = viewModel::skipBlock,
+                        )
+                    } else {
+                        CenteredProgress()
+                    }
                 }
                 composable("projects") {
                     ProjectsScreen(projects)

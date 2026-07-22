@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -19,6 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lifeos.app.data.DayDeviation
+import com.lifeos.app.ui.theme.Lavender100
+import com.lifeos.app.ui.theme.SurfaceVariantDark
 import kotlinx.coroutines.delay
 
 @Composable
@@ -93,12 +96,16 @@ private fun DeviationBanner(deviation: DayDeviation) {
     } else {
         "Отставание от плана: ${-minutes} мин"
     }
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceVariantDark),
+    ) {
         Text(
             text = text,
             modifier = Modifier.padding(16.dp),
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
+            color = Lavender100,
         )
     }
 }
