@@ -1,32 +1,30 @@
 package com.lifeos.app.data
 
 import okhttp3.OkHttpClient
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
+import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
+/**
+ * The server currently exposes nothing but GET /health - this is a thin
+ * connectivity check, not a general-purpose API client.
+ */
 object ApiFactory {
-    fun create(baseUrl: String, accessClientId: String = "", accessClientSecret: String = ""): LifeOsApi {
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
+
+    /** Blocking call - run on a background dispatcher. */
+    fun checkHealth(baseUrl: String, accessClientId: String = "", accessClientSecret: String = ""): Boolean {
         val normalized = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
-        val clientBuilder = OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
-
+        val requestBuilder = Request.Builder().url(normalized + "health")
         if (accessClientId.isNotBlank() && accessClientSecret.isNotBlank()) {
-            clientBuilder.addInterceptor { chain ->
-                val request = chain.request().newBuilder()
-                    .addHeader("CF-Access-Client-Id", accessClientId)
-                    .addHeader("CF-Access-Client-Secret", accessClientSecret)
-                    .build()
-                chain.proceed(request)
-            }
+            requestBuilder
+                .addHeader("CF-Access-Client-Id", accessClientId)
+                .addHeader("CF-Access-Client-Secret", accessClientSecret)
         }
-
-        return Retrofit.Builder()
-            .baseUrl(normalized)
-            .client(clientBuilder.build())
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(LifeOsApi::class.java)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            return response.isSuccessful
+        }
     }
 }

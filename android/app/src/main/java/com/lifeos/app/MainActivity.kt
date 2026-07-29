@@ -147,8 +147,8 @@ private fun LifeOsRoot(
                                     connectionStatus = "Проверка…"
                                     val ok = withContext(Dispatchers.IO) {
                                         runCatching {
-                                            ApiFactory.create(serverUrl, accessClientId, accessClientSecret).getNow()
-                                        }.isSuccess
+                                            ApiFactory.checkHealth(serverUrl, accessClientId, accessClientSecret)
+                                        }.getOrDefault(false)
                                     }
                                     connectionStatus = if (ok) "Сервер доступен" else "Сервер недоступен"
                                 }
