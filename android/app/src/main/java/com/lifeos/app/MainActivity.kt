@@ -7,27 +7,15 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,25 +27,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
-import com.lifeos.app.ui.DayScreen
-import com.lifeos.app.ui.NowScreen
-import com.lifeos.app.ui.ProjectsScreen
+import androidx.compose.ui.unit.dp
+import com.lifeos.app.data.ApiFactory
+import com.lifeos.app.data.SettingsStore
 import com.lifeos.app.ui.SettingsScreen
-import com.lifeos.app.ui.WeekScreen
 import com.lifeos.app.ui.theme.LifeOsTheme
-import com.lifeos.app.ui.toUiState
 import com.lifeos.app.update.UpdateChecker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.time.OffsetDateTime
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: MainViewModel by viewModels()
     private val updateChecker by lazy { UpdateChecker(this, BuildConfig.UPDATE_REPO) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,7 +45,7 @@ class MainActivity : ComponentActivity() {
         handleProvisioningIntent(intent)
         setContent {
             LifeOsTheme {
-                LifeOsRoot(viewModel, updateChecker, ::ensureInstallPermission)
+                LifeOsRoot(updateChecker, ::ensureInstallPermission)
             }
         }
     }
@@ -83,7 +63,7 @@ class MainActivity : ComponentActivity() {
         val clientId = intent.getStringExtra("cf_client_id")
         val clientSecret = intent.getStringExtra("cf_client_secret")
         if (!clientId.isNullOrBlank() && !clientSecret.isNullOrBlank()) {
-            viewModel.provisionAccessCredentials(clientId, clientSecret)
+            SettingsStore(application).setAccessCredentials(clientId, clientSecret)
         }
     }
 
@@ -101,24 +81,26 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun LifeOsRoot(
-    viewModel: MainViewModel,
     updateChecker: UpdateChecker,
     ensureInstallPermission: () -> Boolean,
 ) {
-    val navController = rememberNavController()
-    val nowState by viewModel.nowState.collectAsState()
-    val dayPlan by viewModel.dayPlan.collectAsState()
-    val weekPlans by viewModel.weekPlans.collectAsState()
-    val projects by viewModel.projects.collectAsState()
-    val serverUrl by viewModel.serverUrl.collectAsState()
-    val accessClientId by viewModel.accessClientId.collectAsState()
-    val accessClientSecret by viewModel.accessClientSecret.collectAsState()
-    var updateStatus by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val settingsStore = remember { SettingsStore(context) }
+    val scope = rememberCoroutineScope()
+
+    val serverUrl by settingsStore.serverUrl.collectAsState(initial = SettingsStore.DEFAULT_URL)
+    val accessClientId by settingsStore.accessClientId.collectAsState()
+    val accessClientSecret by settingsStore.accessClientSecret.collectAsState()
+
+    var showSettings by remember { mutableStateOf(false) }
+    var updateStatus by remember { mutableStateOf("") }
+    var connectionStatus by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        settingsStore.discardLegacyPlaintextCredentials()
+    }
 
     suspend fun downloadAndInstall(info: UpdateChecker.UpdateInfo) {
         updateStatus = "Скачиваю версию ${info.version}…"
@@ -142,189 +124,82 @@ private fun LifeOsRoot(
         downloadAndInstall(info)
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Life OS") },
-                actions = {
-                    IconButton(onClick = { navController.navigate("settings") }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Настройки")
+    Scaffold { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (showSettings) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    TextButton(onClick = { showSettings = false }) {
+                        Text("← Назад")
                     }
-                },
-            )
-        },
-        bottomBar = {
-            NavigationBar {
-                val backStackEntry by navController.currentBackStackEntryAsState()
-                val currentRoute = backStackEntry?.destination?.route
-                NavigationBarItem(
-                    selected = currentRoute == "now",
-                    onClick = { navController.navigate("now") },
-                    icon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                    label = { Text("Сейчас") },
-                )
-                NavigationBarItem(
-                    selected = currentRoute == "plan",
-                    onClick = {
-                        navController.navigate("plan")
-                        viewModel.refreshDayPlan()
-                    },
-                    icon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
-                    label = { Text("План") },
-                )
-                NavigationBarItem(
-                    selected = currentRoute == "projects",
-                    onClick = {
-                        navController.navigate("projects")
-                        viewModel.refreshProjects()
-                    },
-                    icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
-                    label = { Text("Проекты") },
-                )
-            }
-        },
-    ) { padding ->
-        Box(modifier = Modifier.padding(padding)) {
-            NavHost(navController = navController, startDestination = "now") {
-                composable("now") {
-                    when (val s = nowState) {
-                        is ConnectionState.Loaded -> NowScreen(
-                            state = s.now.toUiState(),
-                            dayDeviation = s.now.day_deviation,
-                            fetchedAtMillis = s.fetchedAtMillis,
-                            onStart = viewModel::startBlock,
-                            onPause = viewModel::pauseBlock,
-                            onResume = viewModel::resumeBlock,
-                            onComplete = viewModel::completeBlock,
-                            onSkip = viewModel::skipBlock,
-                            onReschedule = { id ->
-                                val block = s.now.current_block
-                                if (block != null) {
-                                    val start = OffsetDateTime.parse(block.planned_start).plusDays(1)
-                                    val end = OffsetDateTime.parse(block.planned_end).plusDays(1)
-                                    viewModel.rescheduleBlock(id, start.toString(), end.toString())
+                    Box(modifier = Modifier.weight(1f)) {
+                        SettingsScreen(
+                            currentUrl = serverUrl,
+                            hasAccessCredentials = accessClientId.isNotBlank() && accessClientSecret.isNotBlank(),
+                            accessClientSecretMasked = settingsStore.accessClientSecretMasked(),
+                            connectionStatus = connectionStatus,
+                            onSave = { url -> scope.launch { settingsStore.setServerUrl(url) } },
+                            onSaveAccessCredentials = { id, secret -> settingsStore.setAccessCredentials(id, secret) },
+                            onTestConnection = {
+                                scope.launch {
+                                    connectionStatus = "Проверка…"
+                                    val ok = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            ApiFactory.create(serverUrl, accessClientId, accessClientSecret).getNow()
+                                        }.isSuccess
+                                    }
+                                    connectionStatus = if (ok) "Сервер доступен" else "Сервер недоступен"
                                 }
                             },
-                            onRestart = viewModel::restartBlock,
-                            onSwitchTask = {
-                                navController.navigate("plan")
-                                viewModel.refreshDayPlan()
+                            onCheckUpdate = {
+                                scope.launch {
+                                    updateStatus = "Проверка…"
+                                    val info = withContext(Dispatchers.IO) {
+                                        runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
+                                    }
+                                    updateStatus = info?.let { "Доступна версия ${it.version}" }
+                                        ?: "Установлена последняя версия"
+                                }
                             },
+                            onUpdateNow = {
+                                scope.launch {
+                                    updateStatus = "Проверка…"
+                                    val info = withContext(Dispatchers.IO) {
+                                        runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
+                                    }
+                                    if (info != null) {
+                                        downloadAndInstall(info)
+                                    } else {
+                                        updateStatus = "Установлена последняя версия"
+                                    }
+                                }
+                            },
+                            updateStatus = updateStatus,
                         )
-                        is ConnectionState.NoConnection -> CenteredMessage("Нет соединения")
-                        is ConnectionState.ServerUnavailable -> CenteredMessage("Сервер недоступен")
-                        is ConnectionState.Loading -> CenteredProgress()
                     }
                 }
-                composable("plan") {
-                    var planTab by remember { mutableStateOf(0) }
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        TabRow(selectedTabIndex = planTab) {
-                            Tab(
-                                selected = planTab == 0,
-                                onClick = { planTab = 0 },
-                                text = { Text("День") },
-                            )
-                            Tab(
-                                selected = planTab == 1,
-                                onClick = {
-                                    planTab = 1
-                                    viewModel.refreshWeekPlan()
-                                },
-                                text = { Text("Неделя") },
-                            )
-                        }
-                        if (planTab == 0) {
-                            val plan = dayPlan
-                            if (plan != null) {
-                                DayScreen(
-                                    plan = plan,
-                                    onStart = viewModel::startBlock,
-                                    onPause = viewModel::pauseBlock,
-                                    onResume = viewModel::resumeBlock,
-                                    onComplete = viewModel::completeBlock,
-                                    onSkip = viewModel::skipBlock,
-                                    onReopen = viewModel::reopenBlock,
-                                    onQueue = viewModel::queueBlock,
-                                    onUpdateTime = viewModel::updateBlockTime,
-                                    onNavigateDate = viewModel::refreshDayPlan,
-                                )
-                            } else {
-                                CenteredProgress()
-                            }
-                        } else {
-                            if (weekPlans.isNotEmpty()) {
-                                WeekScreen(
-                                    plans = weekPlans,
-                                    onStart = viewModel::startBlock,
-                                    onPause = viewModel::pauseBlock,
-                                    onResume = viewModel::resumeBlock,
-                                    onComplete = viewModel::completeBlock,
-                                    onSkip = viewModel::skipBlock,
-                                    onReopen = viewModel::reopenBlock,
-                                    onQueue = viewModel::queueBlock,
-                                    onUpdateTime = viewModel::updateBlockTime,
-                                )
-                            } else {
-                                CenteredProgress()
-                            }
-                        }
-                    }
-                }
-                composable("projects") {
-                    ProjectsScreen(projects)
-                }
-                composable("settings") {
-                    SettingsScreen(
-                        currentUrl = serverUrl,
-                        hasAccessCredentials = accessClientId.isNotBlank() && accessClientSecret.isNotBlank(),
-                        accessClientSecretMasked = run {
-                            val secret = accessClientSecret
-                            if (secret.length < 4) "" else "••••••••" + secret.takeLast(4)
-                        },
-                        onSave = viewModel::updateServerUrl,
-                        onSaveAccessCredentials = viewModel::provisionAccessCredentials,
-                        onCheckUpdate = {
-                            scope.launch {
-                                updateStatus = "Проверка…"
-                                val info = withContext(Dispatchers.IO) {
-                                    runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
-                                }
-                                updateStatus = info?.let { "Доступна версия ${it.version}" }
-                                    ?: "Установлена последняя версия"
-                            }
-                        },
-                        onUpdateNow = {
-                            scope.launch {
-                                updateStatus = "Проверка…"
-                                val info = withContext(Dispatchers.IO) {
-                                    runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
-                                }
-                                if (info != null) {
-                                    downloadAndInstall(info)
-                                } else {
-                                    updateStatus = "Установлена последняя версия"
-                                }
-                            }
-                        },
-                        updateStatus = updateStatus,
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Life OS", style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        "Версия ${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 8.dp),
                     )
+                    if (updateStatus.isNotBlank()) {
+                        Text(updateStatus, modifier = Modifier.padding(top = 16.dp))
+                    }
+                    TextButton(
+                        onClick = { showSettings = true },
+                        modifier = Modifier.padding(top = 24.dp),
+                    ) {
+                        Text("Настройки")
+                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun CenteredProgress() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
-    }
-}
-
-@Composable
-private fun CenteredMessage(text: String) {
-    Box(modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center)) {
-        Text(text)
     }
 }
