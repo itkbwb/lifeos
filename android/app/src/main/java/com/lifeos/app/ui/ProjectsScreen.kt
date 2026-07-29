@@ -53,7 +53,8 @@ private sealed class DialogState {
     object Create : DialogState()
     data class Edit(val project: Project) : DialogState()
     data class ConfirmDelete(val project: Project) : DialogState()
-    data class StartConflict(val newProject: Project, val active: ActiveProject) : DialogState()
+    data class StartPrompt(val project: Project) : DialogState()
+    data class StartConflict(val newProject: Project, val name: String, val active: ActiveProject) : DialogState()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -91,11 +92,14 @@ fun ProjectsScreen(
         )
     }
 
-    fun startProject(project: Project) {
+    fun startProject(project: Project, name: String) {
         scope.launch {
             withContext(Dispatchers.IO) {
                 runCatching {
-                    ApiFactory.createEvent(serverUrl, accessClientId, accessClientSecret, projectId = project.id, type = "start")
+                    ApiFactory.createEvent(
+                        serverUrl, accessClientId, accessClientSecret,
+                        projectId = project.id, type = "start", label = name,
+                    )
                 }
             }.fold(
                 onSuccess = { refreshToken++ },
@@ -103,6 +107,7 @@ fun ProjectsScreen(
                     if (e is ActiveProjectConflictException) {
                         dialogState = DialogState.StartConflict(
                             newProject = project,
+                            name = name,
                             active = ActiveProject(e.activeProjectId, e.activeEventId, e.startedAt),
                         )
                     } else {
@@ -186,7 +191,8 @@ fun ProjectsScreen(
                             if (activeProject?.project_id == project.id) {
                                 endProject(project.id)
                             } else {
-                                startProject(project)
+                                dialogError = ""
+                                dialogState = DialogState.StartPrompt(project)
                             }
                         },
                         onInstant = { logInstant(project) },
@@ -252,6 +258,16 @@ fun ProjectsScreen(
             onRequestDelete = { dialogState = DialogState.ConfirmDelete(state.project) },
         )
 
+        is DialogState.StartPrompt -> StartNameDialog(
+            projectName = state.project.name,
+            initialName = state.project.name,
+            onDismiss = { dialogState = DialogState.None },
+            onConfirm = { name ->
+                dialogState = DialogState.None
+                startProject(state.project, name)
+            },
+        )
+
         is DialogState.StartConflict -> {
             val activeName = projects.firstOrNull { it.id == state.active.project_id }?.name ?: "проект"
             StartConflictDialog(
@@ -273,7 +289,7 @@ fun ProjectsScreen(
                                 )
                                 ApiFactory.createEvent(
                                     serverUrl, accessClientId, accessClientSecret,
-                                    projectId = state.newProject.id, type = "start",
+                                    projectId = state.newProject.id, type = "start", label = state.name,
                                 )
                             }
                         }.fold(

@@ -2,7 +2,7 @@ package com.lifeos.app.ui.calendar
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,11 +11,14 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,15 +27,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.Event
 import com.lifeos.app.data.Project
@@ -46,7 +48,10 @@ import kotlinx.coroutines.withContext
 private const val HOUR_ROW_HEIGHT_DP = 64
 private val HOURS = 0..23
 private const val CONTENT_START_DP = 60
-private val UNFINISHED_BLOCK_HEIGHT = (10 / 60f * HOUR_ROW_HEIGHT_DP).dp
+private const val CONTENT_END_DP = 8
+private const val UNFINISHED_BLOCK_MINUTES = 20
+private val UNFINISHED_BLOCK_HEIGHT = (UNFINISHED_BLOCK_MINUTES / 60f * HOUR_ROW_HEIGHT_DP).dp
+private val INSTANT_ICON_SIZE = 16.dp
 
 private fun yOffsetFor(time: LocalTime): Dp {
     val minutes = time.hour * 60 + time.minute + time.second / 60f
@@ -88,7 +93,9 @@ fun DayTimelineView(
 
     val layout = remember(events, date) { layoutDay(events, date) }
 
-    Box(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        val contentWidth = maxWidth - CONTENT_START_DP.dp - CONTENT_END_DP.dp
+
         Column(modifier = Modifier.fillMaxWidth()) {
             HOURS.forEach { hour ->
                 Box(
@@ -124,14 +131,25 @@ fun DayTimelineView(
             val height = (yOffsetFor(block.endTime) - top).let { if (it < 2.dp) 2.dp else it }
             Box(
                 modifier = Modifier
-                    .padding(start = CONTENT_START_DP.dp, end = 8.dp)
+                    .padding(start = CONTENT_START_DP.dp, end = CONTENT_END_DP.dp)
                     .offset(y = top)
                     .fillMaxWidth()
                     .height(height)
                     .clip(RoundedCornerShape(4.dp))
                     .background(colorFor(projects, block.projectId).copy(alpha = 0.85f))
                     .clickable { onTapInterval(block.event) },
-            )
+            ) {
+                if (!block.name.isNullOrBlank()) {
+                    Text(
+                        text = block.name,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
 
         layout.unfinished?.let { block ->
@@ -139,19 +157,24 @@ fun DayTimelineView(
             val color = colorFor(projects, block.projectId)
             Box(
                 modifier = Modifier
-                    .padding(start = CONTENT_START_DP.dp, end = 8.dp)
+                    .padding(start = CONTENT_START_DP.dp, end = CONTENT_END_DP.dp)
                     .offset(y = top)
                     .fillMaxWidth()
                     .height(UNFINISHED_BLOCK_HEIGHT)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(
-                        Brush.verticalGradient(
-                            0f to color,
-                            0.6f to color,
-                            1f to color.copy(alpha = 0f),
-                        ),
-                    ),
-            )
+                    .background(Brush.verticalGradient(listOf(color, color.copy(alpha = 0f)))),
+            ) {
+                if (!block.name.isNullOrBlank()) {
+                    Text(
+                        text = block.name,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
 
         layout.instants.forEach { marker ->
@@ -159,21 +182,21 @@ fun DayTimelineView(
             val color = colorFor(projects, marker.projectId)
             HorizontalDivider(
                 modifier = Modifier
-                    .padding(start = CONTENT_START_DP.dp, end = 8.dp)
+                    .padding(start = CONTENT_START_DP.dp, end = CONTENT_END_DP.dp)
                     .offset(y = top),
                 thickness = 2.dp,
                 color = color,
             )
-            Box(
+            val xFraction = pseudoRandomFraction(marker.event.id)
+            val iconX = CONTENT_START_DP.dp + (contentWidth - INSTANT_ICON_SIZE) * xFraction
+            Icon(
+                imageVector = Icons.Default.Star,
+                contentDescription = null,
+                tint = color,
                 modifier = Modifier
-                    .offset(x = (CONTENT_START_DP + marker.slotIndex * 22).dp, y = top - 9.dp)
-                    .size(16.dp)
-                    .clip(CircleShape)
-                    .background(color),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("💥", fontSize = 9.sp)
-            }
+                    .offset(x = iconX, y = top - INSTANT_ICON_SIZE / 2)
+                    .size(INSTANT_ICON_SIZE),
+            )
         }
     }
 }
