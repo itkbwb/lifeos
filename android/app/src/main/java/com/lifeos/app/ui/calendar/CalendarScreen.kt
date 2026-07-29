@@ -7,20 +7,37 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.lifeos.app.data.ApiFactory
+import com.lifeos.app.data.Project
 import java.time.LocalDate
 import java.time.YearMonth
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CalendarScreen(modifier: Modifier = Modifier) {
+fun CalendarScreen(
+    serverUrl: String,
+    accessClientId: String,
+    accessClientSecret: String,
+    modifier: Modifier = Modifier,
+) {
     var scale by remember { mutableStateOf(CalendarScale.Day) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var scaleMenuExpanded by remember { mutableStateOf(false) }
+    var projects by remember { mutableStateOf<List<Project>>(emptyList()) }
+
+    LaunchedEffect(serverUrl) {
+        withContext(Dispatchers.IO) {
+            runCatching { ApiFactory.listProjects(serverUrl, accessClientId, accessClientSecret) }
+        }.onSuccess { projects = it }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -44,6 +61,10 @@ fun CalendarScreen(modifier: Modifier = Modifier) {
         when (scale) {
             CalendarScale.Day -> DayTimelineView(
                 date = selectedDate,
+                projects = projects,
+                serverUrl = serverUrl,
+                accessClientId = accessClientId,
+                accessClientSecret = accessClientSecret,
                 modifier = Modifier.padding(padding),
             )
 
@@ -54,6 +75,10 @@ fun CalendarScreen(modifier: Modifier = Modifier) {
                     selectedDate = date
                     scale = CalendarScale.Day
                 },
+                projects = projects,
+                serverUrl = serverUrl,
+                accessClientId = accessClientId,
+                accessClientSecret = accessClientSecret,
                 modifier = Modifier.padding(padding),
             )
 

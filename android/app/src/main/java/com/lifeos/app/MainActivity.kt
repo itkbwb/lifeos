@@ -158,7 +158,11 @@ private fun LifeOsRoot(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (section) {
-                Section.Calendar -> CalendarScreen()
+                Section.Calendar -> CalendarScreen(
+                    serverUrl = serverUrl,
+                    accessClientId = accessClientId,
+                    accessClientSecret = accessClientSecret,
+                )
 
                 Section.Projects -> ProjectsScreen(
                     serverUrl = serverUrl,

@@ -147,6 +147,37 @@ fun ProjectEditDialog(
 }
 
 @Composable
+fun StartConflictDialog(
+    activeProjectName: String,
+    newProjectName: String,
+    onCancel: () -> Unit,
+    onFinishOnly: () -> Unit,
+    onFinishAndStart: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Уже активен «$activeProjectName»") },
+        text = {
+            Column {
+                Text("Нельзя начать «$newProjectName», пока идёт другой проект.")
+                Spacer(Modifier.height(16.dp))
+                TextButton(onClick = onFinishOnly) {
+                    Text("Завершить «$activeProjectName»")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onFinishAndStart) {
+                Text("Завершить и начать «$newProjectName»")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Отмена") }
+        },
+    )
+}
+
+@Composable
 fun DeleteProjectConfirmDialog(
     projectName: String,
     onConfirm: () -> Unit,
