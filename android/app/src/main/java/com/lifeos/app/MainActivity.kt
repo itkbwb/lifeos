@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +29,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.lifeos.app.data.ApiFactory
+import com.lifeos.app.data.SettingsStore
+import com.lifeos.app.ui.SettingsScreen
 import com.lifeos.app.ui.theme.LifeOsTheme
 import com.lifeos.app.update.UpdateChecker
 import kotlinx.coroutines.Dispatchers
@@ -38,10 +43,28 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleProvisioningIntent(intent)
         setContent {
             LifeOsTheme {
                 LifeOsRoot(updateChecker, ::ensureInstallPermission)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleProvisioningIntent(intent)
+    }
+
+    /**
+     * Lets `adb shell am start ... --es cf_client_id X --es cf_client_secret Y` provision
+     * Cloudflare Access service token credentials without them ever passing through chat.
+     */
+    private fun handleProvisioningIntent(intent: Intent) {
+        val clientId = intent.getStringExtra("cf_client_id")
+        val clientSecret = intent.getStringExtra("cf_client_secret")
+        if (!clientId.isNullOrBlank() && !clientSecret.isNullOrBlank()) {
+            SettingsStore(application).setAccessCredentials(clientId, clientSecret)
         }
     }
 
@@ -64,9 +87,21 @@ private fun LifeOsRoot(
     updateChecker: UpdateChecker,
     ensureInstallPermission: () -> Boolean,
 ) {
-    var updateStatus by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val settingsStore = remember { SettingsStore(context) }
+    val scope = rememberCoroutineScope()
+
+    val serverUrl by settingsStore.serverUrl.collectAsState(initial = SettingsStore.DEFAULT_URL)
+    val accessClientId by settingsStore.accessClientId.collectAsState()
+    val accessClientSecret by settingsStore.accessClientSecret.collectAsState()
+
+    var showSettings by remember { mutableStateOf(false) }
+    var updateStatus by remember { mutableStateOf("") }
+    var connectionStatus by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        settingsStore.discardLegacyPlaintextCredentials()
+    }
 
     suspend fun downloadAndInstall(info: UpdateChecker.UpdateInfo) {
         updateStatus = "Скачиваю версию ${info.version}…"
@@ -92,32 +127,78 @@ private fun LifeOsRoot(
 
     Scaffold { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("Life OS", style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    "Версия ${BuildConfig.VERSION_NAME}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                Button(
-                    onClick = {
-                        scope.launch {
-                            val info = withContext(Dispatchers.IO) {
-                                runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
-                            }
-                            if (info != null) downloadAndInstall(info) else updateStatus = "Установлена последняя версия"
-                        }
-                    },
-                    modifier = Modifier.padding(top = 24.dp),
-                ) {
-                    Text("Проверить обновление")
+            if (showSettings) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    TextButton(onClick = { showSettings = false }) {
+                        Text("← Назад")
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        SettingsScreen(
+                            currentUrl = serverUrl,
+                            hasAccessCredentials = accessClientId.isNotBlank() && accessClientSecret.isNotBlank(),
+                            accessClientSecretMasked = settingsStore.accessClientSecretMasked(),
+                            connectionStatus = connectionStatus,
+                            onSave = { url -> scope.launch { settingsStore.setServerUrl(url) } },
+                            onSaveAccessCredentials = { id, secret -> settingsStore.setAccessCredentials(id, secret) },
+                            onTestConnection = {
+                                scope.launch {
+                                    connectionStatus = "Проверка…"
+                                    val ok = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            ApiFactory.create(serverUrl, accessClientId, accessClientSecret).getNow()
+                                        }.isSuccess
+                                    }
+                                    connectionStatus = if (ok) "Сервер доступен" else "Сервер недоступен"
+                                }
+                            },
+                            onCheckUpdate = {
+                                scope.launch {
+                                    updateStatus = "Проверка…"
+                                    val info = withContext(Dispatchers.IO) {
+                                        runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
+                                    }
+                                    updateStatus = info?.let { "Доступна версия ${it.version}" }
+                                        ?: "Установлена последняя версия"
+                                }
+                            },
+                            onUpdateNow = {
+                                scope.launch {
+                                    updateStatus = "Проверка…"
+                                    val info = withContext(Dispatchers.IO) {
+                                        runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
+                                    }
+                                    if (info != null) {
+                                        downloadAndInstall(info)
+                                    } else {
+                                        updateStatus = "Установлена последняя версия"
+                                    }
+                                }
+                            },
+                            updateStatus = updateStatus,
+                        )
+                    }
                 }
-                if (updateStatus.isNotBlank()) {
-                    Text(updateStatus, modifier = Modifier.padding(top = 16.dp))
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Life OS", style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        "Версия ${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    if (updateStatus.isNotBlank()) {
+                        Text(updateStatus, modifier = Modifier.padding(top = 16.dp))
+                    }
+                    TextButton(
+                        onClick = { showSettings = true },
+                        modifier = Modifier.padding(top = 24.dp),
+                    ) {
+                        Text("Настройки")
+                    }
                 }
             }
         }
