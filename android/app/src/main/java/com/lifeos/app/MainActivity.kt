@@ -7,13 +7,9 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,12 +20,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.SettingsStore
+import com.lifeos.app.ui.ProjectsScreen
 import com.lifeos.app.ui.SettingsScreen
 import com.lifeos.app.ui.theme.LifeOsTheme
 import com.lifeos.app.update.UpdateChecker
@@ -127,86 +122,70 @@ private fun LifeOsRoot(
         downloadAndInstall(info)
     }
 
-    Scaffold { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (showSettings) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    TextButton(onClick = { showSettings = false }) {
-                        Text("← Назад")
-                    }
-                    Box(modifier = Modifier.weight(1f)) {
-                        SettingsScreen(
-                            currentUrl = serverUrl,
-                            hasAccessCredentials = accessClientId.isNotBlank() && accessClientSecret.isNotBlank(),
-                            accessClientSecretMasked = settingsStore.accessClientSecretMasked(),
-                            connectionStatus = connectionStatus,
-                            onSave = { url -> scope.launch { settingsStore.setServerUrl(url) } },
-                            onSaveAccessCredentials = { id, secret -> settingsStore.setAccessCredentials(id, secret) },
-                            onTestConnection = {
-                                scope.launch {
-                                    connectionStatus = "Проверка…"
-                                    val ok = withContext(Dispatchers.IO) {
-                                        runCatching {
-                                            ApiFactory.checkHealth(serverUrl, accessClientId, accessClientSecret)
-                                        }.getOrDefault(false)
-                                    }
-                                    connectionStatus = if (ok) "Сервер доступен" else "Сервер недоступен"
-                                }
-                            },
-                            onCheckUpdate = {
-                                scope.launch {
-                                    updateStatus = "Проверка…"
-                                    checkForUpdate().fold(
-                                        onSuccess = { info ->
-                                            updateStatus = info?.let { "Доступна версия ${it.version}" }
-                                                ?: "Установлена последняя версия"
-                                        },
-                                        onFailure = { updateStatus = "Не удалось проверить обновление" },
-                                    )
-                                }
-                            },
-                            onUpdateNow = {
-                                scope.launch {
-                                    updateStatus = "Проверка…"
-                                    checkForUpdate().fold(
-                                        onSuccess = { info ->
-                                            if (info != null) {
-                                                downloadAndInstall(info)
-                                            } else {
-                                                updateStatus = "Установлена последняя версия"
-                                            }
-                                        },
-                                        onFailure = { updateStatus = "Не удалось проверить обновление" },
-                                    )
-                                }
-                            },
-                            updateStatus = updateStatus,
-                        )
-                    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (showSettings) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                TextButton(onClick = { showSettings = false }) {
+                    Text("← Назад")
                 }
-            } else {
-                Column(
-                    modifier = Modifier.fillMaxSize().padding(24.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("Life OS", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        "Версия ${BuildConfig.VERSION_NAME}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(top = 8.dp),
+                Box(modifier = Modifier.weight(1f)) {
+                    SettingsScreen(
+                        currentUrl = serverUrl,
+                        hasAccessCredentials = accessClientId.isNotBlank() && accessClientSecret.isNotBlank(),
+                        accessClientSecretMasked = settingsStore.accessClientSecretMasked(),
+                        connectionStatus = connectionStatus,
+                        appVersion = BuildConfig.VERSION_NAME,
+                        onSave = { url -> scope.launch { settingsStore.setServerUrl(url) } },
+                        onSaveAccessCredentials = { id, secret -> settingsStore.setAccessCredentials(id, secret) },
+                        onTestConnection = {
+                            scope.launch {
+                                connectionStatus = "Проверка…"
+                                val ok = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        ApiFactory.checkHealth(serverUrl, accessClientId, accessClientSecret)
+                                    }.getOrDefault(false)
+                                }
+                                connectionStatus = if (ok) "Сервер доступен" else "Сервер недоступен"
+                            }
+                        },
+                        onCheckUpdate = {
+                            scope.launch {
+                                updateStatus = "Проверка…"
+                                checkForUpdate().fold(
+                                    onSuccess = { info ->
+                                        updateStatus = info?.let { "Доступна версия ${it.version}" }
+                                            ?: "Установлена последняя версия"
+                                    },
+                                    onFailure = { updateStatus = "Не удалось проверить обновление" },
+                                )
+                            }
+                        },
+                        onUpdateNow = {
+                            scope.launch {
+                                updateStatus = "Проверка…"
+                                checkForUpdate().fold(
+                                    onSuccess = { info ->
+                                        if (info != null) {
+                                            downloadAndInstall(info)
+                                        } else {
+                                            updateStatus = "Установлена последняя версия"
+                                        }
+                                    },
+                                    onFailure = { updateStatus = "Не удалось проверить обновление" },
+                                )
+                            }
+                        },
+                        updateStatus = updateStatus,
                     )
-                    if (updateStatus.isNotBlank()) {
-                        Text(updateStatus, modifier = Modifier.padding(top = 16.dp))
-                    }
-                    TextButton(
-                        onClick = { showSettings = true },
-                        modifier = Modifier.padding(top = 24.dp),
-                    ) {
-                        Text("Настройки")
-                    }
                 }
             }
+        } else {
+            ProjectsScreen(
+                serverUrl = serverUrl,
+                accessClientId = accessClientId,
+                accessClientSecret = accessClientSecret,
+                onOpenSettings = { showSettings = true },
+            )
         }
     }
 }

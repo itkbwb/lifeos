@@ -1,15 +1,22 @@
 # Life OS — server
 
-Минимальный FastAPI-каркас. Вся предыдущая бизнес-логика (проекты,
-расписание, блоки, state machine, БД) снесена — будет спроектирована и
-написана заново.
+FastAPI-сервер. Вся старая бизнес-логика (расписание, блоки, state machine)
+снесена — пересобирается заново по главам, глава за главой; текущая глава —
+минимальные Проекты.
 
 ## Что есть сейчас
 
-- `app/main.py` — приложение FastAPI с одним эндпоинтом:
+- `app/main.py`:
   - `GET /health` — `{"status": "ok", "version": ..., "time": ...}`,
     используется Android-клиентом для проверки подключения к серверу.
-- Никакой базы данных, ORM или бизнес-логики в коде нет.
+  - `GET /api/projects`, `POST /api/projects`, `PATCH /api/projects/{id}`,
+    `DELETE /api/projects/{id}` — CRUD над проектами (`id, name, color,
+    created_at`; `color` — один из `lavender, blue, green, yellow, orange,
+    red, pink, gray`). Удаление окончательное, без корзины/архива.
+- SQLite через SQLAlchemy (`app/database.py`, `app/models.py`,
+  `app/schemas.py`), без Alembic — таблица создаётся автоматически при
+  старте (`Base.metadata.create_all`).
+- Тесты: `tests/test_projects.py` (pytest + `TestClient`, in-memory SQLite).
 
 ## Запуск
 
@@ -38,6 +45,5 @@ chmod +x install_service.sh
 
 ## Данные
 
-Реальных пользовательских данных сервер сейчас не хранит — БД удалена
-вместе со старой бизнес-логикой при демонтаже. Когда появится новая схема,
-здесь снова будет `data/lifeos.db` (не коммитится, см. `.gitignore`).
+`data/lifeos.db` (не коммитится, см. `.gitignore`) — создаётся автоматически
+при первом запуске, содержит только таблицу `projects`.

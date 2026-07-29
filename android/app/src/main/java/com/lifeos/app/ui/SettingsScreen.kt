@@ -31,6 +31,7 @@ fun SettingsScreen(
     hasAccessCredentials: Boolean,
     accessClientSecretMasked: String,
     connectionStatus: String,
+    appVersion: String,
     onSave: (String) -> Unit,
     onSaveAccessCredentials: (String, String) -> Unit,
     onTestConnection: () -> Unit,
@@ -124,6 +125,11 @@ fun SettingsScreen(
         }
         Spacer(Modifier.height(8.dp))
         Text(updateStatus)
+
+        Spacer(Modifier.height(32.dp))
+        Divider()
+        Spacer(Modifier.height(16.dp))
+        Text("Версия $appVersion")
         Spacer(Modifier.height(24.dp))
     }
 }
