@@ -25,3 +25,7 @@ android/captures/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local-only handoff notes - repo is public, this can name internal
+# hosts/IPs/topology that shouldn't be committed.
+HANDOFF.md
