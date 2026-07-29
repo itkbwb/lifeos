@@ -102,6 +102,11 @@ private fun LifeOsRoot(
         settingsStore.discardLegacyPlaintextCredentials()
     }
 
+    suspend fun checkForUpdate(): Result<UpdateChecker.UpdateInfo?> =
+        withContext(Dispatchers.IO) {
+            runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }
+        }
+
     suspend fun downloadAndInstall(info: UpdateChecker.UpdateInfo) {
         updateStatus = "Скачиваю версию ${info.version}…"
         val uri = withContext(Dispatchers.IO) {
@@ -118,9 +123,7 @@ private fun LifeOsRoot(
     }
 
     LaunchedEffect(Unit) {
-        val info = withContext(Dispatchers.IO) {
-            runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
-        } ?: return@LaunchedEffect
+        val info = checkForUpdate().getOrNull() ?: return@LaunchedEffect
         downloadAndInstall(info)
     }
 
@@ -153,24 +156,28 @@ private fun LifeOsRoot(
                             onCheckUpdate = {
                                 scope.launch {
                                     updateStatus = "Проверка…"
-                                    val info = withContext(Dispatchers.IO) {
-                                        runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
-                                    }
-                                    updateStatus = info?.let { "Доступна версия ${it.version}" }
-                                        ?: "Установлена последняя версия"
+                                    checkForUpdate().fold(
+                                        onSuccess = { info ->
+                                            updateStatus = info?.let { "Доступна версия ${it.version}" }
+                                                ?: "Установлена последняя версия"
+                                        },
+                                        onFailure = { updateStatus = "Не удалось проверить обновление" },
+                                    )
                                 }
                             },
                             onUpdateNow = {
                                 scope.launch {
                                     updateStatus = "Проверка…"
-                                    val info = withContext(Dispatchers.IO) {
-                                        runCatching { updateChecker.checkLatest(BuildConfig.VERSION_NAME) }.getOrNull()
-                                    }
-                                    if (info != null) {
-                                        downloadAndInstall(info)
-                                    } else {
-                                        updateStatus = "Установлена последняя версия"
-                                    }
+                                    checkForUpdate().fold(
+                                        onSuccess = { info ->
+                                            if (info != null) {
+                                                downloadAndInstall(info)
+                                            } else {
+                                                updateStatus = "Установлена последняя версия"
+                                            }
+                                        },
+                                        onFailure = { updateStatus = "Не удалось проверить обновление" },
+                                    )
                                 }
                             },
                             updateStatus = updateStatus,

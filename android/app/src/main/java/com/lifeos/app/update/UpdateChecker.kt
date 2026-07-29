@@ -8,6 +8,7 @@ import com.google.gson.Gson
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 private data class GithubAsset(val name: String, val browser_download_url: String)
@@ -22,19 +23,28 @@ class UpdateChecker(private val context: Context, private val repo: String) {
         .build()
     private val gson = Gson()
 
-    /** Blocking call - run on a background dispatcher. Returns null if no newer release exists. */
+    /**
+     * Blocking call - run on a background dispatcher. Returns null only when the check
+     * succeeded and no newer release exists. Throws on any failure (network, GitHub API
+     * error incl. rate limiting, malformed response) so callers can tell "up to date"
+     * apart from "couldn't check" instead of silently reporting both as the former.
+     */
     fun checkLatest(currentVersion: String): UpdateInfo? {
         val request = Request.Builder()
             .url("https://api.github.com/repos/$repo/releases/latest")
             .header("Accept", "application/vnd.github+json")
             .build()
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return null
-            val body = response.body?.string() ?: return null
+            if (!response.isSuccessful) {
+                throw IOException("GitHub releases check failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string()
+                ?: throw IOException("GitHub releases check failed: empty response body")
             val release = gson.fromJson(body, GithubRelease::class.java)
             val remoteVersion = release.tag_name.removePrefix("v")
             if (!isNewer(remoteVersion, currentVersion)) return null
-            val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk") } ?: return null
+            val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk") }
+                ?: throw IOException("GitHub release $remoteVersion has no .apk asset")
             return UpdateInfo(remoteVersion, apkAsset.browser_download_url)
         }
     }
