@@ -8,10 +8,18 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -26,6 +34,7 @@ import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.SettingsStore
 import com.lifeos.app.ui.ProjectsScreen
 import com.lifeos.app.ui.SettingsScreen
+import com.lifeos.app.ui.calendar.CalendarScreen
 import com.lifeos.app.ui.theme.LifeOsTheme
 import com.lifeos.app.update.UpdateChecker
 import kotlinx.coroutines.Dispatchers
@@ -89,7 +98,7 @@ private fun LifeOsRoot(
     val accessClientId by settingsStore.accessClientId.collectAsState()
     val accessClientSecret by settingsStore.accessClientSecret.collectAsState()
 
-    var showSettings by remember { mutableStateOf(false) }
+    var section by remember { mutableStateOf(Section.Calendar) }
     var updateStatus by remember { mutableStateOf("") }
     var connectionStatus by remember { mutableStateOf("") }
 
@@ -122,70 +131,93 @@ private fun LifeOsRoot(
         downloadAndInstall(info)
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (showSettings) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                TextButton(onClick = { showSettings = false }) {
-                    Text("← Назад")
-                }
-                Box(modifier = Modifier.weight(1f)) {
-                    SettingsScreen(
-                        currentUrl = serverUrl,
-                        hasAccessCredentials = accessClientId.isNotBlank() && accessClientSecret.isNotBlank(),
-                        accessClientSecretMasked = settingsStore.accessClientSecretMasked(),
-                        connectionStatus = connectionStatus,
-                        appVersion = BuildConfig.VERSION_NAME,
-                        onSave = { url -> scope.launch { settingsStore.setServerUrl(url) } },
-                        onSaveAccessCredentials = { id, secret -> settingsStore.setAccessCredentials(id, secret) },
-                        onTestConnection = {
-                            scope.launch {
-                                connectionStatus = "Проверка…"
-                                val ok = withContext(Dispatchers.IO) {
-                                    runCatching {
-                                        ApiFactory.checkHealth(serverUrl, accessClientId, accessClientSecret)
-                                    }.getOrDefault(false)
-                                }
-                                connectionStatus = if (ok) "Сервер доступен" else "Сервер недоступен"
-                            }
-                        },
-                        onCheckUpdate = {
-                            scope.launch {
-                                updateStatus = "Проверка…"
-                                checkForUpdate().fold(
-                                    onSuccess = { info ->
-                                        updateStatus = info?.let { "Доступна версия ${it.version}" }
-                                            ?: "Установлена последняя версия"
-                                    },
-                                    onFailure = { updateStatus = "Не удалось проверить обновление" },
-                                )
-                            }
-                        },
-                        onUpdateNow = {
-                            scope.launch {
-                                updateStatus = "Проверка…"
-                                checkForUpdate().fold(
-                                    onSuccess = { info ->
-                                        if (info != null) {
-                                            downloadAndInstall(info)
-                                        } else {
-                                            updateStatus = "Установлена последняя версия"
-                                        }
-                                    },
-                                    onFailure = { updateStatus = "Не удалось проверить обновление" },
-                                )
-                            }
-                        },
-                        updateStatus = updateStatus,
-                    )
-                }
+    Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = section == Section.Calendar,
+                    onClick = { section = Section.Calendar },
+                    icon = { Icon(Icons.Default.DateRange, contentDescription = null) },
+                    label = { Text("Календарь") },
+                )
+                NavigationBarItem(
+                    selected = section == Section.Projects,
+                    onClick = { section = Section.Projects },
+                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                    label = { Text("Проекты") },
+                )
+                NavigationBarItem(
+                    selected = section == Section.Settings,
+                    onClick = { section = Section.Settings },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                    label = { Text("Настройки") },
+                )
             }
-        } else {
-            ProjectsScreen(
-                serverUrl = serverUrl,
-                accessClientId = accessClientId,
-                accessClientSecret = accessClientSecret,
-                onOpenSettings = { showSettings = true },
-            )
+        },
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            when (section) {
+                Section.Calendar -> CalendarScreen()
+
+                Section.Projects -> ProjectsScreen(
+                    serverUrl = serverUrl,
+                    accessClientId = accessClientId,
+                    accessClientSecret = accessClientSecret,
+                    onOpenSettings = { section = Section.Settings },
+                )
+
+                Section.Settings -> SettingsScreen(
+                    currentUrl = serverUrl,
+                    hasAccessCredentials = accessClientId.isNotBlank() && accessClientSecret.isNotBlank(),
+                    accessClientSecretMasked = settingsStore.accessClientSecretMasked(),
+                    connectionStatus = connectionStatus,
+                    appVersion = BuildConfig.VERSION_NAME,
+                    onSave = { url -> scope.launch { settingsStore.setServerUrl(url) } },
+                    onSaveAccessCredentials = { id, secret -> settingsStore.setAccessCredentials(id, secret) },
+                    onTestConnection = {
+                        scope.launch {
+                            connectionStatus = "Проверка…"
+                            val ok = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    ApiFactory.checkHealth(serverUrl, accessClientId, accessClientSecret)
+                                }.getOrDefault(false)
+                            }
+                            connectionStatus = if (ok) "Сервер доступен" else "Сервер недоступен"
+                        }
+                    },
+                    onCheckUpdate = {
+                        scope.launch {
+                            updateStatus = "Проверка…"
+                            checkForUpdate().fold(
+                                onSuccess = { info ->
+                                    updateStatus = info?.let { "Доступна версия ${it.version}" }
+                                        ?: "Установлена последняя версия"
+                                },
+                                onFailure = { updateStatus = "Не удалось проверить обновление" },
+                            )
+                        }
+                    },
+                    onUpdateNow = {
+                        scope.launch {
+                            updateStatus = "Проверка…"
+                            checkForUpdate().fold(
+                                onSuccess = { info ->
+                                    if (info != null) {
+                                        downloadAndInstall(info)
+                                    } else {
+                                        updateStatus = "Установлена последняя версия"
+                                    }
+                                },
+                                onFailure = { updateStatus = "Не удалось проверить обновление" },
+                            )
+                        }
+                    },
+                    updateStatus = updateStatus,
+                )
+            }
         }
     }
 }
+
+private enum class Section { Calendar, Projects, Settings }
