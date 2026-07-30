@@ -14,7 +14,11 @@ import java.util.concurrent.TimeUnit
 private data class GithubAsset(val name: String, val browser_download_url: String)
 private data class GithubRelease(val tag_name: String, val assets: List<GithubAsset>)
 
-class UpdateChecker(private val context: Context, private val repo: String) {
+class UpdateChecker(
+    private val context: Context,
+    private val repo: String,
+    private val apiBaseUrl: String = "https://api.github.com",
+) {
     data class UpdateInfo(val version: String, val downloadUrl: String)
 
     private val client = OkHttpClient.Builder()
@@ -31,7 +35,7 @@ class UpdateChecker(private val context: Context, private val repo: String) {
      */
     fun checkLatest(currentVersion: String): UpdateInfo? {
         val request = Request.Builder()
-            .url("https://api.github.com/repos/$repo/releases/latest")
+            .url("$apiBaseUrl/repos/$repo/releases/latest")
             .header("Accept", "application/vnd.github+json")
             .build()
         client.newCall(request).execute().use { response ->
