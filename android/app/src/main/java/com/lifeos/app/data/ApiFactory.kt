@@ -1,8 +1,10 @@
 package com.lifeos.app.data
 
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 import java.io.IOException
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -103,6 +105,125 @@ object ApiFactory {
                 throw IOException("deleteProject failed: HTTP ${response.code}")
             }
         }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun listEvents(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectId: Int? = null,
+        from: String? = null,
+        to: String? = null,
+    ): List<Event> {
+        val params = mutableListOf<String>()
+        projectId?.let { params += "project_id=$it" }
+        from?.let { params += "from=" + URLEncoder.encode(it, "UTF-8") }
+        to?.let { params += "to=" + URLEncoder.encode(it, "UTF-8") }
+        val query = if (params.isEmpty()) "" else "?" + params.joinToString("&")
+        val requestBuilder = Request.Builder().url(normalize(baseUrl) + "api/events" + query)
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("listEvents failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("listEvents: empty response body")
+            val type = object : TypeToken<List<Event>>() {}.type
+            return gson.fromJson(body, type)
+        }
+    }
+
+    /**
+     * Blocking call - run on a background dispatcher. Throws [ActiveProjectConflictException] on
+     * HTTP 409 when a `start` conflicts with an already-active project, or IOException otherwise.
+     */
+    fun createEvent(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectId: Int,
+        type: String,
+        occurredAt: String? = null,
+        label: String? = null,
+    ): Event {
+        val fields = mutableMapOf<String, Any>("project_id" to projectId, "type" to type)
+        occurredAt?.let { fields["occurred_at"] = it }
+        label?.let { fields["label"] = it }
+        val json = gson.toJson(fields)
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/events")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            val body = response.body?.string()
+            if (response.code == 409) {
+                throw parseActiveConflict(body) ?: IOException("createEvent conflict: HTTP 409")
+            }
+            if (!response.isSuccessful) {
+                throw IOException("createEvent failed: HTTP ${response.code}")
+            }
+            return gson.fromJson(body ?: throw IOException("createEvent: empty response body"), Event::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Returns null when no project is active. */
+    fun getActiveProject(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+    ): ActiveProject? {
+        val requestBuilder = Request.Builder().url(normalize(baseUrl) + "api/events/active")
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (response.code == 204) return null
+            if (!response.isSuccessful) {
+                throw IOException("getActiveProject failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("getActiveProject: empty response body")
+            return gson.fromJson(body, ActiveProject::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun correctEvent(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        eventId: Int,
+        projectId: Int? = null,
+        type: String? = null,
+        occurredAt: String? = null,
+        label: String? = null,
+    ): Event {
+        val fields = mutableMapOf<String, Any>()
+        projectId?.let { fields["project_id"] = it }
+        type?.let { fields["type"] = it }
+        occurredAt?.let { fields["occurred_at"] = it }
+        label?.let { fields["label"] = it }
+        val json = gson.toJson(fields)
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/events/$eventId/correct")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("correctEvent failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("correctEvent: empty response body")
+            return gson.fromJson(body, Event::class.java)
+        }
+    }
+
+    private fun parseActiveConflict(body: String?): ActiveProjectConflictException? {
+        if (body == null) return null
+        return runCatching {
+            val detail = gson.fromJson(body, JsonObject::class.java).getAsJsonObject("detail")
+            ActiveProjectConflictException(
+                activeProjectId = detail.get("active_project_id").asInt,
+                activeEventId = detail.get("active_event_id").asInt,
+                startedAt = detail.get("started_at").asString,
+            )
+        }.getOrNull()
     }
 
     private fun addAccessHeaders(builder: Request.Builder, accessClientId: String, accessClientSecret: String) {

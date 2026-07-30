@@ -147,6 +147,68 @@ fun ProjectEditDialog(
 }
 
 @Composable
+fun StartNameDialog(
+    projectName: String,
+    initialName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initialName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Начать «$projectName»") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Название события") },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) {
+                Text("Начать")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+
+@Composable
+fun StartConflictDialog(
+    activeProjectName: String,
+    newProjectName: String,
+    onCancel: () -> Unit,
+    onFinishOnly: () -> Unit,
+    onFinishAndStart: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Уже активен «$activeProjectName»") },
+        text = {
+            Column {
+                Text("Нельзя начать «$newProjectName», пока идёт другой проект.")
+                Spacer(Modifier.height(16.dp))
+                TextButton(onClick = onFinishOnly) {
+                    Text("Завершить «$activeProjectName»")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onFinishAndStart) {
+                Text("Завершить и начать «$newProjectName»")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Отмена") }
+        },
+    )
+}
+
+@Composable
 fun DeleteProjectConfirmDialog(
     projectName: String,
     onConfirm: () -> Unit,

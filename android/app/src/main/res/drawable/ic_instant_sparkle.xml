@@ -1,0 +1,33 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Base shape: Lucide "sparkles" glyph (ISC license), converted from stroke to fill —
+         a 4-point sparkle with rounded tips and concave-curved waists between the points. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M11.017,2.814a1,1 0,0 1,1.966 0l1.051,5.558a2,2 0,0 0,1.594 1.594l5.558,1.051a1,1 0,0 1,0 1.966l-5.558,1.051a2,2 0,0 0,-1.594 1.594l-1.051,5.558a1,1 0,0 1,-1.966 0l-1.051,-5.558a2,2 0,0 0,-1.594 -1.594l-5.558,-1.051a1,1 0,0 1,0 -1.966l5.558,-1.051a2,2 0,0 0,1.594 -1.594z" />
+    <group
+        android:pivotX="12"
+        android:pivotY="12"
+        android:scaleX="0.32"
+        android:scaleY="0.32"
+        android:translateX="-6.5"
+        android:translateY="-6.5">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M11.017,2.814a1,1 0,0 1,1.966 0l1.051,5.558a2,2 0,0 0,1.594 1.594l5.558,1.051a1,1 0,0 1,0 1.966l-5.558,1.051a2,2 0,0 0,-1.594 1.594l-1.051,5.558a1,1 0,0 1,-1.966 0l-1.051,-5.558a2,2 0,0 0,-1.594 -1.594l-5.558,-1.051a1,1 0,0 1,0 -1.966l5.558,-1.051a2,2 0,0 0,1.594 -1.594z" />
+    </group>
+    <group
+        android:pivotX="12"
+        android:pivotY="12"
+        android:scaleX="0.24"
+        android:scaleY="0.24"
+        android:translateX="7"
+        android:translateY="6.5">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M11.017,2.814a1,1 0,0 1,1.966 0l1.051,5.558a2,2 0,0 0,1.594 1.594l5.558,1.051a1,1 0,0 1,0 1.966l-5.558,1.051a2,2 0,0 0,-1.594 1.594l-1.051,5.558a1,1 0,0 1,-1.966 0l-1.051,-5.558a2,2 0,0 0,-1.594 -1.594l-5.558,-1.051a1,1 0,0 1,0 -1.966l5.558,-1.051a2,2 0,0 0,1.594 -1.594z" />
+    </group>
+</vector>

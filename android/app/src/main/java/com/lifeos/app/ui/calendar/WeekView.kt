@@ -20,6 +20,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.lifeos.app.data.Project
 import java.time.LocalDate
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
@@ -33,6 +34,10 @@ fun WeekView(
     selectedDate: LocalDate,
     onSelectDate: (LocalDate) -> Unit,
     onOpenDay: (LocalDate) -> Unit,
+    projects: List<Project>,
+    serverUrl: String,
+    accessClientId: String,
+    accessClientSecret: String,
     modifier: Modifier = Modifier,
 ) {
     val weekStartDate = remember(selectedDate) { weekStart(selectedDate) }
@@ -67,7 +72,14 @@ fun WeekView(
                     modifier = Modifier.clickable { onOpenDay(date) },
                 )
             }
-            DayTimelineView(date = date, modifier = Modifier.fillMaxSize())
+            DayTimelineView(
+                date = date,
+                projects = projects,
+                serverUrl = serverUrl,
+                accessClientId = accessClientId,
+                accessClientSecret = accessClientSecret,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }

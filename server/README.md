@@ -1,8 +1,8 @@
 # Life OS — server
 
 FastAPI-сервер. Вся старая бизнес-логика (расписание, блоки, state machine)
-снесена — пересобирается заново по главам, глава за главой; текущая глава —
-минимальные Проекты.
+снесена — пересобирается заново по главам, глава за главой; текущие главы —
+Проекты, Календарь (только Android) и Timeline (история событий).
 
 ## Что есть сейчас
 
@@ -12,11 +12,24 @@ FastAPI-сервер. Вся старая бизнес-логика (распи�
   - `GET /api/projects`, `POST /api/projects`, `PATCH /api/projects/{id}`,
     `DELETE /api/projects/{id}` — CRUD над проектами (`id, name, color,
     created_at`; `color` — один из `lavender, blue, green, yellow, orange,
-    red, pink, gray`). Удаление окончательное, без корзины/архива.
+    red, pink, gray`). Удаление запрещено (409), если у проекта уже есть
+    события Timeline — история не должна теряться молча.
+  - `POST /api/events`, `GET /api/events`, `GET /api/events/active`,
+    `POST /api/events/{id}/correct` — Timeline: `start`/`end`/`instant`
+    события, каждое принадлежит ровно одному проекту. Одновременно активен
+    только один проект — `start` при уже активном другом проекте вернёт 409
+    с данными активного проекта. События неизменяемы: исправление ошибки —
+    это `correct`, который добавляет новую запись (`corrects_id`) и лишь
+    помечает старую как скорректированную (`superseded_by_id`,
+    `corrected_at`), не трогая её исходные `occurred_at`/`type`.
 - SQLite через SQLAlchemy (`app/database.py`, `app/models.py`,
-  `app/schemas.py`), без Alembic — таблица создаётся автоматически при
-  старте (`Base.metadata.create_all`).
-- Тесты: `tests/test_projects.py` (pytest + `TestClient`, in-memory SQLite).
+  `app/schemas.py`), без Alembic — таблицы создаются автоматически при
+  старте (`Base.metadata.create_all`). `PRAGMA foreign_keys=ON` включена на
+  уровне подключения (иначе SQLite не проверяет внешние ключи), даты
+  хранятся через кастомный `UTCDateTime` (SQLite иначе теряет tzinfo при
+  round-trip).
+- Тесты: `tests/test_projects.py`, `tests/test_events.py` (pytest +
+  `TestClient`, in-memory SQLite).
 
 ## Запуск
 
@@ -46,4 +59,4 @@ chmod +x install_service.sh
 ## Данные
 
 `data/lifeos.db` (не коммитится, см. `.gitignore`) — создаётся автоматически
-при первом запуске, содержит только таблицу `projects`.
+при первом запуске, содержит таблицы `projects` и `events`.
