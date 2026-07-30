@@ -291,7 +291,11 @@ internal fun DayTimelineContent(
                             .fillMaxWidth()
                             .height(height)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(color.copy(alpha = item.fillAlpha ?: TIMELINE_FILL_ALPHA))
+                            // Opaque pre-blended color, not a semi-transparent overlay - see
+                            // ProjectColors.timelineBlockColor: Dynamic Plan draws directly
+                            // underneath, so an actually-translucent fill would ghost its
+                            // label/wash through wherever the two layers coincide.
+                            .background(ProjectColors.timelineBlockColor(color))
                             .clickable { eventsById[item.sourceId]?.let(onTapInterval) },
                     ) {
                         item.label?.let { label ->
