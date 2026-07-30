@@ -231,6 +231,100 @@ def test_change_missing_entry_404(client):
     assert resp.status_code == 404
 
 
+# --- Chapter 4 scenario 16: Static/Dynamic Plan and Timeline are independent domains ---
+
+
+def test_creating_an_event_does_not_create_a_plan_entry(client):
+    project = _make_project(client)
+    client.post(
+        "/api/events",
+        json={"project_id": project["id"], "type": "start", "occurred_at": "2026-08-01T09:00:00Z"},
+    )
+    assert client.get("/api/plan/entries").json() == []
+    assert client.get("/api/plan/dynamic").json() == []
+
+
+def test_creating_a_plan_entry_does_not_create_an_event(client):
+    project = _make_project(client)
+    client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T10:00:00Z",
+        },
+    )
+    assert client.get("/api/events").json() == []
+
+
+def test_a_plan_change_does_not_create_or_touch_any_event(client):
+    project = _make_project(client)
+    entry = client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T10:00:00Z",
+        },
+    ).json()
+    client.post(
+        f"/api/plan/entries/{entry['id']}/changes",
+        json={
+            "change_type": "move",
+            "new_start_time": "2026-08-01T11:00:00Z",
+            "new_end_time": "2026-08-01T12:00:00Z",
+        },
+    )
+    assert client.get("/api/events").json() == []
+
+
+def test_an_active_plan_entry_does_not_block_or_alter_starting_an_event(client):
+    """Planning and Timeline are independent domains (chapter 4.4) - a Static Plan
+    entry covering right now must not affect the existing START/END conflict rule
+    (only another *active Timeline* session blocks a start, per chapter 3)."""
+    project = _make_project(client)
+    client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T10:00:00Z",
+        },
+    )
+    resp = client.post(
+        "/api/events",
+        json={"project_id": project["id"], "type": "start", "occurred_at": "2026-08-01T09:30:00Z"},
+    )
+    assert resp.status_code == 201
+
+    # The plan entry itself is untouched by the event that just happened inside its span.
+    plan_entries = client.get("/api/plan/entries").json()
+    assert len(plan_entries) == 1
+    assert plan_entries[0]["start_time"] == "2026-08-01T09:00:00Z"
+    assert plan_entries[0]["end_time"] == "2026-08-01T10:00:00Z"
+
+
+def test_correcting_an_event_does_not_touch_plan_entries(client):
+    project = _make_project(client)
+    client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T10:00:00Z",
+        },
+    )
+    event = client.post(
+        "/api/events",
+        json={"project_id": project["id"], "type": "start", "occurred_at": "2026-08-01T09:30:00Z"},
+    ).json()
+    client.post(f"/api/events/{event['id']}/correct", json={"label": "corrected"})
+
+    plan_entries = client.get("/api/plan/entries").json()
+    assert len(plan_entries) == 1
+    assert plan_entries[0]["start_time"] == "2026-08-01T09:00:00Z"
+
+
 def test_update_plan_entry_mutates_static_directly(client):
     project = _make_project(client)
     entry = client.post(

@@ -42,7 +42,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
-    private val updateChecker by lazy { UpdateChecker(this, BuildConfig.UPDATE_REPO) }
+    private val updateChecker by lazy {
+        UpdateChecker(this, BuildConfig.UPDATE_REPO, BuildConfig.UPDATE_CHECK_BASE_URL)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

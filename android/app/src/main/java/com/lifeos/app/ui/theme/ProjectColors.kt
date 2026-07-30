@@ -34,6 +34,19 @@ object ProjectColors {
     }
 
     /**
+     * Timeline's actual paint color: the same visible shade a semi-transparent
+     * `color.copy(alpha = BLOCK_ALPHA)` block would produce against the plain dark
+     * background, but pre-blended into an opaque color rather than painted as an
+     * overlay. Chapter 4 draws Dynamic Plan (with its own fill and label) directly
+     * underneath Timeline; an actually-semi-transparent Timeline fill lets whatever is
+     * beneath it - Dynamic's wash, its label text - bleed through as a visible ghost
+     * wherever the two coincide. Painting the pre-blended solid color instead keeps
+     * Timeline's look identical to before (same formula [contrastingTextColor] already
+     * assumes) while genuinely occluding anything drawn under it.
+     */
+    fun timelineBlockColor(color: Color): Color = lerp(BackgroundDark, color, BLOCK_ALPHA)
+
+    /**
      * A derived shade of a project color for the Static Plan outline (see chapter
      * 4.6/4.7 - Static never fills, only outlines, in a tint distinct from the
      * project's own solid color so it doesn't read as a second Timeline block).

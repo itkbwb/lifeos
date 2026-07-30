@@ -30,6 +30,15 @@ def health():
     }
 
 
+@app.get("/repos/{owner}/{repo}/releases/latest")
+def fake_github_latest_release(owner: str, repo: str):
+    """Stub for GitHub's release API, hit only by debug builds (see UpdateChecker /
+    UPDATE_CHECK_BASE_URL in build.gradle.kts) - always reports "no update" so the
+    emulator never gets hijacked by the real update-available dialog mid-test.
+    """
+    return {"tag_name": "v0.0.0", "assets": []}
+
+
 @app.get("/api/projects", response_model=list[schemas.ProjectOut])
 def list_projects(db: Session = Depends(get_db)):
     return db.query(models.Project).order_by(models.Project.created_at.asc()).all()

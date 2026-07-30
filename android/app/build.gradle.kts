@@ -40,6 +40,7 @@ android {
         versionName = appVersionName
 
         buildConfigField("String", "UPDATE_REPO", "\"itkbwb/lifeos\"")
+        buildConfigField("String", "UPDATE_CHECK_BASE_URL", "\"https://api.github.com\"")
     }
 
     signingConfigs {
@@ -59,6 +60,12 @@ android {
             if (decodedKeystore != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
+        }
+        // Debug builds hit the local dev server's stub instead of the real GitHub
+        // API - avoids the update-available dialog hijacking the emulator mid-test
+        // (see UpdateChecker; 10.0.2.2 is the emulator's alias for the host machine).
+        debug {
+            buildConfigField("String", "UPDATE_CHECK_BASE_URL", "\"http://10.0.2.2:8000\"")
         }
     }
 
