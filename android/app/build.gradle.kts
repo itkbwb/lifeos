@@ -4,7 +4,6 @@ import java.util.Base64
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("app.cash.paparazzi") version "1.3.4"
 }
 
 fun computeVersionCode(v: String): Int {

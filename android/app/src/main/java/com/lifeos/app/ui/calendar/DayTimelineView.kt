@@ -297,18 +297,10 @@ internal fun DayTimelineContent(
                             // label/wash through wherever the two layers coincide.
                             .background(ProjectColors.timelineBlockColor(color))
                             .clickable { eventsById[item.sourceId]?.let(onTapInterval) },
-                    ) {
-                        item.label?.let { label ->
-                            Text(
-                                text = label,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = ProjectColors.contrastingTextColor(color),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                    )
+                    // Label is drawn in a later pass (see below), on top of INSTANT
+                    // markers - an INSTANT's full-width line is allowed to cross this
+                    // block's fill (and Dynamic's, underneath), but never this label text.
                 }
 
                 RenderLayerType.TIMELINE_UNFINISHED -> {
@@ -320,18 +312,8 @@ internal fun DayTimelineContent(
                             .height(UNFINISHED_BLOCK_HEIGHT)
                             .clip(RoundedCornerShape(4.dp))
                             .background(Brush.verticalGradient(listOf(color, color.copy(alpha = 0f)))),
-                    ) {
-                        item.label?.let { label ->
-                            Text(
-                                text = label,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = ProjectColors.contrastingTextColor(color),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                    )
+                    // Label drawn later, same reasoning as TIMELINE_INTERVAL above.
                 }
 
                 RenderLayerType.TIMELINE_INSTANT -> {
@@ -381,6 +363,41 @@ internal fun DayTimelineContent(
                         )
                     }
                 }
+            }
+        }
+
+        // Timeline's own labels (interval + unfinished), redrawn as a final pass on top
+        // of everything above - including INSTANT markers, whose full-width line is
+        // otherwise allowed to cross this row (see the two branches above). Positioned
+        // identically to where each block already draws its fill, so it lines up exactly.
+        renderItems.forEach { item ->
+            if (item.layerType != RenderLayerType.TIMELINE_INTERVAL && item.layerType != RenderLayerType.TIMELINE_UNFINISHED) {
+                return@forEach
+            }
+            val label = item.label ?: return@forEach
+            val top = yOffsetFor(item.startTime)
+            val color = colorFor(projects, item.projectId)
+            Box(
+                modifier = Modifier
+                    .padding(start = CONTENT_START_DP.dp, end = CONTENT_END_DP.dp)
+                    .offset(y = top)
+                    .fillMaxWidth()
+                    .height(
+                        if (item.layerType == RenderLayerType.TIMELINE_UNFINISHED) {
+                            UNFINISHED_BLOCK_HEIGHT
+                        } else {
+                            blockHeight(top, yOffsetFor(item.endTime))
+                        },
+                    ),
+            ) {
+                Text(
+                    text = label,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ProjectColors.contrastingTextColor(color),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
