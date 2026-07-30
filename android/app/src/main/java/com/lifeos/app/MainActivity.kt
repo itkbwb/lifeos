@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -35,6 +36,7 @@ import com.lifeos.app.data.SettingsStore
 import com.lifeos.app.ui.ProjectsScreen
 import com.lifeos.app.ui.SettingsScreen
 import com.lifeos.app.ui.calendar.CalendarScreen
+import com.lifeos.app.ui.calendar.DashboardScreen
 import com.lifeos.app.ui.theme.LifeOsTheme
 import com.lifeos.app.update.UpdateChecker
 import kotlinx.coroutines.Dispatchers
@@ -100,7 +102,7 @@ private fun LifeOsRoot(
     val accessClientId by settingsStore.accessClientId.collectAsState()
     val accessClientSecret by settingsStore.accessClientSecret.collectAsState()
 
-    var section by remember { mutableStateOf(Section.Calendar) }
+    var section by remember { mutableStateOf(Section.Dashboard) }
     var updateStatus by remember { mutableStateOf("") }
     var connectionStatus by remember { mutableStateOf("") }
 
@@ -138,6 +140,12 @@ private fun LifeOsRoot(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
+                    selected = section == Section.Dashboard,
+                    onClick = { section = Section.Dashboard },
+                    icon = { Icon(Icons.Default.Speed, contentDescription = null) },
+                    label = { Text("Дашборд") },
+                )
+                NavigationBarItem(
                     selected = section == Section.Calendar,
                     onClick = { section = Section.Calendar },
                     icon = { Icon(Icons.Default.DateRange, contentDescription = null) },
@@ -160,6 +168,12 @@ private fun LifeOsRoot(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (section) {
+                Section.Dashboard -> DashboardScreen(
+                    serverUrl = serverUrl,
+                    accessClientId = accessClientId,
+                    accessClientSecret = accessClientSecret,
+                )
+
                 Section.Calendar -> CalendarScreen(
                     serverUrl = serverUrl,
                     accessClientId = accessClientId,
@@ -229,4 +243,4 @@ private fun LifeOsRoot(
     }
 }
 
-private enum class Section { Calendar, Projects, Settings }
+private enum class Section { Dashboard, Calendar, Projects, Settings }

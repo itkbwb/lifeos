@@ -162,3 +162,63 @@ fun ConfirmDeleteDialog(
         },
     )
 }
+
+/**
+ * The Dashboard's Instant button (chapter: dashboard) - project, name, and
+ * time, with time pre-filled to the moment the button was pressed but still
+ * editable (e.g. logging something a few minutes after it actually happened).
+ */
+@Composable
+fun DashboardInstantDialog(
+    projects: List<Project>,
+    initialTime: LocalTime,
+    errorMessage: String,
+    onDismiss: () -> Unit,
+    onConfirm: (projectId: Int, time: LocalTime, name: String) -> Unit,
+) {
+    var projectId by remember { mutableStateOf(projects.firstOrNull()?.id) }
+    var name by remember { mutableStateOf("") }
+    var timeText by remember { mutableStateOf(EVENT_TIME_FORMAT.format(initialTime)) }
+
+    val time = runCatching { LocalTime.parse(timeText, EVENT_TIME_FORMAT) }.getOrNull()
+    val isValid = projectId != null && time != null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Инстант") },
+        text = {
+            Column {
+                ProjectPicker(projects, projectId, onSelect = { projectId = it })
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Название") },
+                    placeholder = { Text("Необязательно") },
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = timeText,
+                    onValueChange = { timeText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Время") },
+                    placeholder = { Text("09:00") },
+                )
+                if (errorMessage.isNotBlank()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(errorMessage, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = isValid,
+                onClick = { onConfirm(projectId!!, time!!, name.trim()) },
+            ) { Text("Отметить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
