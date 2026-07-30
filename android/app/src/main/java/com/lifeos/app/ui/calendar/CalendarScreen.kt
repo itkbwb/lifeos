@@ -1,6 +1,7 @@
 package com.lifeos.app.ui.calendar
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -80,24 +81,30 @@ fun CalendarScreen(
         },
     ) { padding ->
         when (scale) {
-            CalendarScale.Day -> if (dayListMode) {
-                DayEventListView(
-                    date = selectedDate,
-                    projects = projects,
-                    serverUrl = serverUrl,
-                    accessClientId = accessClientId,
-                    accessClientSecret = accessClientSecret,
-                    modifier = Modifier.padding(padding),
-                )
-            } else {
-                DayTimelineView(
-                    date = selectedDate,
-                    projects = projects,
-                    serverUrl = serverUrl,
-                    accessClientId = accessClientId,
-                    accessClientSecret = accessClientSecret,
-                    modifier = Modifier.padding(padding),
-                )
+            CalendarScale.Day -> DayPager(
+                selectedDate = selectedDate,
+                onSelectDate = { selectedDate = it },
+                modifier = Modifier.padding(padding),
+            ) { date ->
+                if (dayListMode) {
+                    DayEventListView(
+                        date = date,
+                        projects = projects,
+                        serverUrl = serverUrl,
+                        accessClientId = accessClientId,
+                        accessClientSecret = accessClientSecret,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    DayTimelineView(
+                        date = date,
+                        projects = projects,
+                        serverUrl = serverUrl,
+                        accessClientId = accessClientId,
+                        accessClientSecret = accessClientSecret,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
 
             CalendarScale.Week -> WeekView(

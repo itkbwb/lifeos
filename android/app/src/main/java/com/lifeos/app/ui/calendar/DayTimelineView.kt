@@ -60,9 +60,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private const val HOUR_ROW_HEIGHT_DP = 64
+// internal (not private) so WeekGridView can share the exact same hour-row
+// geometry - it draws its own multi-column grid rather than reusing
+// DayTimelineContent, but must line up pixel-for-pixel with Day scale.
+internal const val HOUR_ROW_HEIGHT_DP = 64
 private val HOURS = 0..23
-private const val CONTENT_START_DP = 60
+internal const val CONTENT_START_DP = 60
 private const val CONTENT_END_DP = 8
 private val UNFINISHED_BLOCK_HEIGHT = (UNFINISHED_FADE_MINUTES / 60f * HOUR_ROW_HEIGHT_DP).dp
 private val INSTANT_ICON_SIZE = 16.dp
