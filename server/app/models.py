@@ -65,6 +65,7 @@ class PlanEntry(Base):
     )
     start_time: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
     end_time: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime,
         default=lambda: datetime.now(timezone.utc),

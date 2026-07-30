@@ -15,7 +15,41 @@ def test_create_plan_entry(client):
     assert resp.status_code == 201
     body = resp.json()
     assert body["project_id"] == project["id"]
-    assert set(body.keys()) == {"id", "project_id", "start_time", "end_time", "created_at"}
+    assert body["name"] is None
+    assert set(body.keys()) == {"id", "project_id", "start_time", "end_time", "name", "created_at"}
+
+
+def test_create_plan_entry_with_name(client):
+    project = _make_project(client)
+    resp = client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T11:00:00Z",
+            "name": "Deep work block",
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["name"] == "Deep work block"
+
+    dynamic = client.get("/api/plan/dynamic").json()
+    assert dynamic[0]["name"] == "Deep work block"
+
+
+def test_create_plan_entry_blank_name_becomes_none(client):
+    project = _make_project(client)
+    resp = client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T11:00:00Z",
+            "name": "   ",
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["name"] is None
 
 
 def test_create_plan_entry_end_before_start_rejected(client):

@@ -118,6 +118,7 @@ class PlanEntryCreate(BaseModel):
     project_id: int
     start_time: datetime
     end_time: datetime
+    name: Optional[str] = None
 
     @field_validator("end_time")
     @classmethod
@@ -127,6 +128,14 @@ class PlanEntryCreate(BaseModel):
             raise ValueError("end_time must be after start_time")
         return v
 
+    @field_validator("name")
+    @classmethod
+    def name_blank_to_none(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        return v or None
+
 
 class PlanEntryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -135,6 +144,7 @@ class PlanEntryOut(BaseModel):
     project_id: int
     start_time: datetime
     end_time: datetime
+    name: Optional[str]
     created_at: datetime
 
 
@@ -183,3 +193,4 @@ class DynamicPlanEntryOut(BaseModel):
     project_id: int
     start_time: datetime
     end_time: datetime
+    name: Optional[str]

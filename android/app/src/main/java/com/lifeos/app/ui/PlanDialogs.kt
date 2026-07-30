@@ -71,11 +71,12 @@ fun StaticPlanFormDialog(
     projects: List<Project>,
     errorMessage: String,
     onDismiss: () -> Unit,
-    onConfirm: (projectId: Int, startTime: LocalTime, endTime: LocalTime) -> Unit,
+    onConfirm: (projectId: Int, startTime: LocalTime, endTime: LocalTime, name: String?) -> Unit,
 ) {
     var selectedProjectId by remember { mutableStateOf(projects.firstOrNull()?.id) }
     var startText by remember { mutableStateOf("09:00") }
     var endText by remember { mutableStateOf("10:00") }
+    var name by remember { mutableStateOf("") }
 
     val startTime = runCatching { LocalTime.parse(startText) }.getOrNull()
     val endTime = runCatching { LocalTime.parse(endText) }.getOrNull()
@@ -87,6 +88,14 @@ fun StaticPlanFormDialog(
         text = {
             Column {
                 ProjectPicker(projects, selectedProjectId, onSelect = { selectedProjectId = it })
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Название") },
+                    placeholder = { Text("Необязательно") },
+                )
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
@@ -112,7 +121,7 @@ fun StaticPlanFormDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(selectedProjectId!!, startTime!!, endTime!!) },
+                onClick = { onConfirm(selectedProjectId!!, startTime!!, endTime!!, name.ifBlank { null }) },
                 enabled = isValid,
             ) {
                 Text("Запланировать")

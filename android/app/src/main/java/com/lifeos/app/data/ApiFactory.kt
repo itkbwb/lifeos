@@ -222,10 +222,13 @@ object ApiFactory {
         projectId: Int,
         startTime: String,
         endTime: String,
+        name: String? = null,
     ): PlanEntry {
-        val json = gson.toJson(
-            mapOf("project_id" to projectId, "start_time" to startTime, "end_time" to endTime),
+        val fields = mutableMapOf<String, Any>(
+            "project_id" to projectId, "start_time" to startTime, "end_time" to endTime,
         )
+        name?.let { fields["name"] = it }
+        val json = gson.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/plan/entries")
             .post(json.toRequestBody(jsonMediaType))

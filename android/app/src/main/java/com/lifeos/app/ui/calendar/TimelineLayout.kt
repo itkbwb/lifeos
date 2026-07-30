@@ -108,6 +108,7 @@ data class PlanBlockData(
     val projectId: Int,
     val startTime: LocalTime,
     val endTime: LocalTime,
+    val name: String?,
 )
 
 private fun clipToDay(start: Instant, end: Instant, date: LocalDate, zone: ZoneId): Pair<LocalTime, LocalTime>? {
@@ -123,7 +124,7 @@ private fun clipToDay(start: Instant, end: Instant, date: LocalDate, zone: ZoneI
 fun layoutStaticPlan(entries: List<PlanEntry>, date: LocalDate, zone: ZoneId = ZoneId.systemDefault()): List<PlanBlockData> =
     entries.mapNotNull { entry ->
         val span = clipToDay(Instant.parse(entry.start_time), Instant.parse(entry.end_time), date, zone)
-        span?.let { (startTime, endTime) -> PlanBlockData(entry.id, entry.project_id, startTime, endTime) }
+        span?.let { (startTime, endTime) -> PlanBlockData(entry.id, entry.project_id, startTime, endTime, entry.name) }
     }
 
 /** Renders the Dynamic Plan layer (chapter 4.6): Static + changes, recomputed by the server. */
@@ -134,5 +135,5 @@ fun layoutDynamicPlan(
 ): List<PlanBlockData> =
     entries.mapNotNull { entry ->
         val span = clipToDay(Instant.parse(entry.start_time), Instant.parse(entry.end_time), date, zone)
-        span?.let { (startTime, endTime) -> PlanBlockData(entry.id, entry.project_id, startTime, endTime) }
+        span?.let { (startTime, endTime) -> PlanBlockData(entry.id, entry.project_id, startTime, endTime, entry.name) }
     }

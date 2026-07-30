@@ -255,6 +255,7 @@ def create_plan_entry(payload: schemas.PlanEntryCreate, db: Session = Depends(ge
         project_id=payload.project_id,
         start_time=payload.start_time,
         end_time=payload.end_time,
+        name=payload.name,
     )
     db.add(entry)
     db.commit()
@@ -354,6 +355,7 @@ def get_dynamic_plan(
                 project_id=entry.project_id,
                 start_time=start_time,
                 end_time=end_time,
+                name=entry.name,
             )
         )
 

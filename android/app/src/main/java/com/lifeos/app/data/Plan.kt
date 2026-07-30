@@ -5,6 +5,7 @@ data class PlanEntry(
     val project_id: Int,
     val start_time: String,
     val end_time: String,
+    val name: String?,
     val created_at: String,
 )
 
@@ -13,4 +14,5 @@ data class DynamicPlanEntry(
     val project_id: Int,
     val start_time: String,
     val end_time: String,
+    val name: String?,
 )

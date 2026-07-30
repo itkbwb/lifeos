@@ -67,7 +67,7 @@ private const val CONTENT_END_DP = 8
 private const val UNFINISHED_BLOCK_MINUTES = 20
 private val UNFINISHED_BLOCK_HEIGHT = (UNFINISHED_BLOCK_MINUTES / 60f * HOUR_ROW_HEIGHT_DP).dp
 private val INSTANT_ICON_SIZE = 16.dp
-private const val DYNAMIC_PLAN_ALPHA = 0.75f
+private const val DYNAMIC_PLAN_ALPHA = 0.2f
 private val STATIC_PLAN_STROKE_WIDTH = 2.dp
 private val STATIC_PLAN_DASH = 8.dp
 private val STATIC_PLAN_GAP = 6.dp
@@ -185,7 +185,20 @@ fun DayTimelineView(
                     .height(height)
                     .clip(RoundedCornerShape(4.dp))
                     .background(color.copy(alpha = DYNAMIC_PLAN_ALPHA)),
-            )
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                if (!block.name.isNullOrBlank()) {
+                    Text(
+                        text = block.name,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ProjectColors.contrastingTextColor(color).copy(alpha = DYNAMIC_PLAN_ALPHA),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
         }
 
         layout.intervals.forEach { block ->
@@ -310,7 +323,7 @@ fun DayTimelineView(
                 showPlanDialog = false
                 planErrorMessage = ""
             },
-            onConfirm = { projectId, startTime, endTime ->
+            onConfirm = { projectId, startTime, endTime, name ->
                 val zone = ZoneId.systemDefault()
                 val startInstant = date.atTime(startTime).atZone(zone).toInstant().toString()
                 val endInstant = date.atTime(endTime).atZone(zone).toInstant().toString()
@@ -324,6 +337,7 @@ fun DayTimelineView(
                                 projectId = projectId,
                                 startTime = startInstant,
                                 endTime = endInstant,
+                                name = name,
                             )
                         }
                     }.onSuccess {
