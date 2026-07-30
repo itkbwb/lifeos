@@ -2,7 +2,12 @@ package com.lifeos.app.ui.calendar
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -31,6 +36,7 @@ fun CalendarScreen(
     var scale by remember { mutableStateOf(CalendarScale.Day) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var scaleMenuExpanded by remember { mutableStateOf(false) }
+    var dayListMode by remember { mutableStateOf(false) }
     var projects by remember { mutableStateOf<List<Project>>(emptyList()) }
 
     LaunchedEffect(serverUrl) {
@@ -55,18 +61,39 @@ fun CalendarScreen(
                         onSelect = { scale = it },
                     )
                 },
+                actions = {
+                    if (scale == CalendarScale.Day) {
+                        IconButton(onClick = { dayListMode = !dayListMode }) {
+                            Icon(
+                                imageVector = if (dayListMode) Icons.Filled.DateRange else Icons.AutoMirrored.Filled.List,
+                                contentDescription = if (dayListMode) "Показать таймлайн" else "Показать списком",
+                            )
+                        }
+                    }
+                },
             )
         },
     ) { padding ->
         when (scale) {
-            CalendarScale.Day -> DayTimelineView(
-                date = selectedDate,
-                projects = projects,
-                serverUrl = serverUrl,
-                accessClientId = accessClientId,
-                accessClientSecret = accessClientSecret,
-                modifier = Modifier.padding(padding),
-            )
+            CalendarScale.Day -> if (dayListMode) {
+                DayEventListView(
+                    date = selectedDate,
+                    projects = projects,
+                    serverUrl = serverUrl,
+                    accessClientId = accessClientId,
+                    accessClientSecret = accessClientSecret,
+                    modifier = Modifier.padding(padding),
+                )
+            } else {
+                DayTimelineView(
+                    date = selectedDate,
+                    projects = projects,
+                    serverUrl = serverUrl,
+                    accessClientId = accessClientId,
+                    accessClientSecret = accessClientSecret,
+                    modifier = Modifier.padding(padding),
+                )
+            }
 
             CalendarScale.Week -> WeekView(
                 selectedDate = selectedDate,

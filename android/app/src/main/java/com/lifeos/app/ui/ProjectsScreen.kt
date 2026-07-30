@@ -54,6 +54,7 @@ private sealed class DialogState {
     data class Edit(val project: Project) : DialogState()
     data class ConfirmDelete(val project: Project) : DialogState()
     data class StartPrompt(val project: Project) : DialogState()
+    data class InstantPrompt(val project: Project) : DialogState()
     data class StartConflict(val newProject: Project, val name: String, val active: ActiveProject) : DialogState()
 }
 
@@ -131,11 +132,14 @@ fun ProjectsScreen(
         }
     }
 
-    fun logInstant(project: Project) {
+    fun logInstant(project: Project, name: String) {
         scope.launch {
             withContext(Dispatchers.IO) {
                 runCatching {
-                    ApiFactory.createEvent(serverUrl, accessClientId, accessClientSecret, projectId = project.id, type = "instant")
+                    ApiFactory.createEvent(
+                        serverUrl, accessClientId, accessClientSecret,
+                        projectId = project.id, type = "instant", label = name.ifBlank { null },
+                    )
                 }
             }.fold(
                 onSuccess = { refreshToken++ },
@@ -195,7 +199,10 @@ fun ProjectsScreen(
                                 dialogState = DialogState.StartPrompt(project)
                             }
                         },
-                        onInstant = { logInstant(project) },
+                        onInstant = {
+                            dialogError = ""
+                            dialogState = DialogState.InstantPrompt(project)
+                        },
                     )
                 }
             }
@@ -265,6 +272,15 @@ fun ProjectsScreen(
             onConfirm = { name ->
                 dialogState = DialogState.None
                 startProject(state.project, name)
+            },
+        )
+
+        is DialogState.InstantPrompt -> InstantNameDialog(
+            projectName = state.project.name,
+            onDismiss = { dialogState = DialogState.None },
+            onConfirm = { name ->
+                dialogState = DialogState.None
+                logInstant(state.project, name)
             },
         )
 

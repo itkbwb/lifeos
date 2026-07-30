@@ -25,6 +25,7 @@ data class UnfinishedBlockData(
 data class InstantMarkerData(
     val projectId: Int,
     val time: LocalTime,
+    val name: String?,
     val event: Event,
 )
 
@@ -91,7 +92,7 @@ fun layoutDay(events: List<Event>, date: LocalDate, zone: ZoneId = ZoneId.system
 
     val instants = events
         .filter { it.type == "instant" && zonedDate(it, zone) == date }
-        .map { InstantMarkerData(it.project_id, zonedTime(it, zone), it) }
+        .map { InstantMarkerData(it.project_id, zonedTime(it, zone), it.label, it) }
 
     return DayLayout(intervals, unfinished, instants)
 }

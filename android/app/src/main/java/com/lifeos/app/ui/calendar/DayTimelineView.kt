@@ -129,6 +129,7 @@ fun DayTimelineView(
         layout.intervals.forEach { block ->
             val top = yOffsetFor(block.startTime)
             val height = (yOffsetFor(block.endTime) - top).let { if (it < 2.dp) 2.dp else it }
+            val color = colorFor(projects, block.projectId)
             Box(
                 modifier = Modifier
                     .padding(start = CONTENT_START_DP.dp, end = CONTENT_END_DP.dp)
@@ -136,7 +137,7 @@ fun DayTimelineView(
                     .fillMaxWidth()
                     .height(height)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(colorFor(projects, block.projectId).copy(alpha = 0.85f))
+                    .background(color.copy(alpha = 0.85f))
                     .clickable { onTapInterval(block.event) },
             ) {
                 if (!block.name.isNullOrBlank()) {
@@ -144,7 +145,7 @@ fun DayTimelineView(
                         text = block.name,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.Black,
+                        color = ProjectColors.contrastingTextColor(color),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -169,7 +170,7 @@ fun DayTimelineView(
                         text = block.name,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.Black,
+                        color = ProjectColors.contrastingTextColor(color),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
