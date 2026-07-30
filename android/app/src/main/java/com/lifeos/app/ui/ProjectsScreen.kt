@@ -5,21 +5,25 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -36,7 +40,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.lifeos.app.R
 import com.lifeos.app.data.ActiveProject
 import com.lifeos.app.data.ActiveProjectConflictException
 import com.lifeos.app.data.ApiFactory
@@ -182,9 +189,13 @@ fun ProjectsScreen(
                 }
             }
 
-            LoadState.Loaded -> LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
+            LoadState.Loaded -> LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 items(projects, key = { it.id }) { project ->
-                    ProjectRow(
+                    ProjectTile(
                         project = project,
                         isActive = activeProject?.project_id == project.id,
                         onClick = {
@@ -340,29 +351,45 @@ fun ProjectsScreen(
 }
 
 @Composable
-private fun ProjectRow(
+private fun ProjectTile(
     project: Project,
     isActive: Boolean,
     onClick: () -> Unit,
     onToggleActive: () -> Unit,
     onInstant: () -> Unit,
 ) {
+    val color = ProjectColors.colorFor(project.color)
+    val onColor = ProjectColors.contrastingTextColor(color)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(color)
             .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 8.dp),
+            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(14.dp)
-                .clip(CircleShape)
-                .background(ProjectColors.colorFor(project.color)),
+        Text(
+            text = project.name,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = onColor,
+            modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(16.dp))
-        Text(project.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        TextButton(onClick = onToggleActive) { Text(if (isActive) "■" else "▶") }
-        TextButton(onClick = onInstant) { Text("💥") }
+        IconButton(onClick = onToggleActive) {
+            Icon(
+                imageVector = if (isActive) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                contentDescription = if (isActive) "Завершить" else "Начать",
+                tint = onColor,
+            )
+        }
+        IconButton(onClick = onInstant) {
+            Icon(
+                painter = painterResource(R.drawable.ic_instant_sparkle),
+                contentDescription = "Отметить",
+                tint = onColor,
+            )
+        }
     }
 }
