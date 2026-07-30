@@ -1,12 +1,16 @@
 package com.lifeos.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.SettingsStore
+import com.lifeos.app.notifications.schedulePlanNotifications
 import com.lifeos.app.ui.ProjectsScreen
 import com.lifeos.app.ui.SettingsScreen
 import com.lifeos.app.ui.calendar.CalendarScreen
@@ -48,9 +53,14 @@ class MainActivity : ComponentActivity() {
         UpdateChecker(this, BuildConfig.UPDATE_REPO, BuildConfig.UPDATE_CHECK_BASE_URL)
     }
 
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleProvisioningIntent(intent)
+        ensureNotificationPermission()
+        schedulePlanNotifications(applicationContext)
         setContent {
             LifeOsTheme {
                 LifeOsRoot(updateChecker, ::ensureInstallPermission)
@@ -72,6 +82,15 @@ class MainActivity : ComponentActivity() {
         val clientSecret = intent.getStringExtra("cf_client_secret")
         if (!clientId.isNullOrBlank() && !clientSecret.isNullOrBlank()) {
             SettingsStore(application).setAccessCredentials(clientId, clientSecret)
+        }
+    }
+
+    private fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -101,6 +120,7 @@ private fun LifeOsRoot(
     val serverUrl by settingsStore.serverUrl.collectAsState(initial = SettingsStore.DEFAULT_URL)
     val accessClientId by settingsStore.accessClientId.collectAsState()
     val accessClientSecret by settingsStore.accessClientSecret.collectAsState()
+    val notificationsEnabled by settingsStore.notificationsEnabled.collectAsState(initial = true)
 
     var section by remember { mutableStateOf(Section.Dashboard) }
     var updateStatus by remember { mutableStateOf("") }
@@ -237,6 +257,8 @@ private fun LifeOsRoot(
                         }
                     },
                     updateStatus = updateStatus,
+                    notificationsEnabled = notificationsEnabled,
+                    onSetNotificationsEnabled = { enabled -> scope.launch { settingsStore.setNotificationsEnabled(enabled) } },
                 )
             }
         }

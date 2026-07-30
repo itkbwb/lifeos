@@ -19,6 +19,7 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,6 +53,8 @@ fun SettingsScreen(
     onCheckUpdate: () -> Unit,
     onUpdateNow: () -> Unit,
     updateStatus: String,
+    notificationsEnabled: Boolean,
+    onSetNotificationsEnabled: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -169,6 +172,24 @@ fun SettingsScreen(
         }
         Spacer(Modifier.height(8.dp))
         Text(updateStatus)
+
+        Spacer(Modifier.height(32.dp))
+        Divider()
+        Spacer(Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Уведомления о начале/окончании")
+                Text(
+                    "Предлагает начать проект перед плановым временем и закончить, когда план истёк",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = notificationsEnabled, onCheckedChange = onSetNotificationsEnabled)
+        }
 
         Spacer(Modifier.height(32.dp))
         Divider()

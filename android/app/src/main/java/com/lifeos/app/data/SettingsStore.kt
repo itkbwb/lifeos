@@ -3,7 +3,9 @@ package com.lifeos.app.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -17,6 +19,9 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 class SettingsStore(private val context: Context) {
     private val serverUrlKey = stringPreferencesKey("server_base_url")
+    private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
+    private val lastStartNotifiedIdKey = intPreferencesKey("last_start_notified_plan_entry_id")
+    private val lastStopNotifiedIdKey = intPreferencesKey("last_stop_notified_event_id")
 
     // Legacy plaintext keys - only ever read once, to be wiped, never trusted again.
     private val legacyAccessClientIdKey = stringPreferencesKey("cf_access_client_id")
@@ -46,6 +51,35 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setServerUrl(url: String) {
         context.dataStore.edit { prefs -> prefs[serverUrlKey] = url }
+    }
+
+    /** Whether the start/stop suggestion worker is allowed to post notifications
+     * (chapter: notifications) - default on; the worker itself checks this every
+     * run rather than the periodic WorkManager registration being toggled. */
+    val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[notificationsEnabledKey] ?: true
+    }
+
+    suspend fun setNotificationsEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[notificationsEnabledKey] = enabled }
+    }
+
+    /** Dedup state so the same Dynamic Plan entry / active session doesn't
+     * re-notify on every 15-minute worker tick. -1 means "nothing notified yet". */
+    val lastStartNotifiedPlanEntryId: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[lastStartNotifiedIdKey] ?: -1
+    }
+
+    suspend fun setLastStartNotifiedPlanEntryId(id: Int) {
+        context.dataStore.edit { prefs -> prefs[lastStartNotifiedIdKey] = id }
+    }
+
+    val lastStopNotifiedEventId: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[lastStopNotifiedIdKey] ?: -1
+    }
+
+    suspend fun setLastStopNotifiedEventId(id: Int) {
+        context.dataStore.edit { prefs -> prefs[lastStopNotifiedIdKey] = id }
     }
 
     fun setAccessCredentials(clientId: String, clientSecret: String) {
