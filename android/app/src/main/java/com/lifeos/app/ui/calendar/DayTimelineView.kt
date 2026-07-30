@@ -185,7 +185,7 @@ fun DayTimelineView(
                     .height(height)
                     .clip(RoundedCornerShape(4.dp))
                     .background(color.copy(alpha = DYNAMIC_PLAN_ALPHA)),
-                contentAlignment = Alignment.CenterEnd,
+                contentAlignment = Alignment.TopEnd,
             ) {
                 if (!block.name.isNullOrBlank()) {
                     Text(
