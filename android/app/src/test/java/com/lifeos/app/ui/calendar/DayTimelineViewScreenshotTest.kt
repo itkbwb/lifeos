@@ -1,7 +1,11 @@
 package com.lifeos.app.ui.calendar
 
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
+import com.android.ide.common.rendering.api.SessionParams
 import com.lifeos.app.data.DynamicPlanEntry
 import com.lifeos.app.data.Event
 import com.lifeos.app.data.PlanEntry
@@ -16,17 +20,27 @@ import org.junit.Test
  * only (per plan), not a replacement for [DayRenderModelTest]'s exhaustive unit coverage.
  * Renders [DayTimelineContent] directly from fixture data, no server/network involved.
  *
- * Every scenario places its events around 08:00-18:00 (never touching the 00:00 row, so
- * the day grid's top edge never crops a block). The device canvas is stretched tall
- * enough (see [paparazzi]'s `screenHeight`) that the whole 00:00-24:00 grid renders in
- * one shot with no scrolling/offset tricks - the empty 00:00-08:00 hours just show as
- * plain grid above the events, which is harmless and far more reliable than fighting
- * Compose's offset/constraint order to crop a scroll viewport in a screenshot test.
+ * Every scenario places its events in 08:00-18:00. Paparazzi's default Composable
+ * snapshot mode measures content at "wrap height" (it ignores any height/clip Modifier
+ * we tried applying and always renders the full day, however tall) - explicit
+ * [SessionParams.RenderingMode.NORMAL] instead renders a real fixed-size device canvas,
+ * like an actual screen, that a plain [Modifier.offset] can scroll-crop: shifting
+ * [DayTimelineContent] up by 7 hours reveals a 08:00+ window instead of 00:00. The
+ * device height (see `screenHeight` below) is sized generously past 18:00 so nothing
+ * in these fixtures is cropped, but nowhere near the ~24h "whole day" stretch this file
+ * used before - this is a single normal-looking screenshot, not a stretched one.
  */
 class DayTimelineViewScreenshotTest {
 
     @get:Rule
-    val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_5.copy(screenHeight = 4000))
+    val paparazzi = Paparazzi(
+        deviceConfig = DeviceConfig.PIXEL_5.copy(screenHeight = 3600),
+        renderingMode = SessionParams.RenderingMode.NORMAL,
+    )
+
+    /** Hours 00:00-07:00 hold nothing in any scenario - shifting the whole day up by this
+     * many hours puts 08:00 at the top of the frame instead of empty grid. */
+    private val windowStartOffset = (-7 * 64).dp
 
     // The 8 real production project colors (see ProjectColors.palette), in palette order.
     private val allProjects = listOf(
@@ -57,6 +71,7 @@ class DayTimelineViewScreenshotTest {
                     renderItems = renderItems,
                     projects = allProjects,
                     eventsById = eventsById,
+                    modifier = Modifier.offset(y = windowStartOffset),
                 )
             }
         }
