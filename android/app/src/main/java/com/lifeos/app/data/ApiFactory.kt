@@ -214,6 +214,111 @@ object ApiFactory {
         }
     }
 
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun createPlanEntry(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectId: Int,
+        startTime: String,
+        endTime: String,
+        name: String? = null,
+    ): PlanEntry {
+        val fields = mutableMapOf<String, Any>(
+            "project_id" to projectId, "start_time" to startTime, "end_time" to endTime,
+        )
+        name?.let { fields["name"] = it }
+        val json = gson.toJson(fields)
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/plan/entries")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("createPlanEntry failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("createPlanEntry: empty response body")
+            return gson.fromJson(body, PlanEntry::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun listPlanEntries(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectId: Int? = null,
+        from: String? = null,
+        to: String? = null,
+    ): List<PlanEntry> {
+        val params = mutableListOf<String>()
+        projectId?.let { params += "project_id=$it" }
+        from?.let { params += "from=" + URLEncoder.encode(it, "UTF-8") }
+        to?.let { params += "to=" + URLEncoder.encode(it, "UTF-8") }
+        val query = if (params.isEmpty()) "" else "?" + params.joinToString("&")
+        val requestBuilder = Request.Builder().url(normalize(baseUrl) + "api/plan/entries" + query)
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("listPlanEntries failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("listPlanEntries: empty response body")
+            val type = object : TypeToken<List<PlanEntry>>() {}.type
+            return gson.fromJson(body, type)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun listDynamicPlan(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectId: Int? = null,
+        from: String? = null,
+        to: String? = null,
+    ): List<DynamicPlanEntry> {
+        val params = mutableListOf<String>()
+        projectId?.let { params += "project_id=$it" }
+        from?.let { params += "from=" + URLEncoder.encode(it, "UTF-8") }
+        to?.let { params += "to=" + URLEncoder.encode(it, "UTF-8") }
+        val query = if (params.isEmpty()) "" else "?" + params.joinToString("&")
+        val requestBuilder = Request.Builder().url(normalize(baseUrl) + "api/plan/dynamic" + query)
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("listDynamicPlan failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("listDynamicPlan: empty response body")
+            val type = object : TypeToken<List<DynamicPlanEntry>>() {}.type
+            return gson.fromJson(body, type)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun createPlanChange(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        planEntryId: Int,
+        changeType: String,
+        newStartTime: String? = null,
+        newEndTime: String? = null,
+    ) {
+        val fields = mutableMapOf<String, Any>("change_type" to changeType)
+        newStartTime?.let { fields["new_start_time"] = it }
+        newEndTime?.let { fields["new_end_time"] = it }
+        val json = gson.toJson(fields)
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/plan/entries/$planEntryId/changes")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("createPlanChange failed: HTTP ${response.code}")
+            }
+        }
+    }
+
     private fun parseActiveConflict(body: String?): ActiveProjectConflictException? {
         if (body == null) return null
         return runCatching {

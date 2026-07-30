@@ -178,6 +178,34 @@ fun StartNameDialog(
 }
 
 @Composable
+fun InstantNameDialog(
+    projectName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Отметить «$projectName»") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Название (необязательно)") },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name) }) { Text("Отметить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+
+@Composable
 fun StartConflictDialog(
     activeProjectName: String,
     newProjectName: String,

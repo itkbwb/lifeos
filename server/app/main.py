@@ -243,3 +243,121 @@ def correct_event(event_id: int, payload: schemas.EventCorrect, db: Session = De
     db.commit()
     db.refresh(corrected)
     return corrected
+
+
+@app.post("/api/plan/entries", response_model=schemas.PlanEntryOut, status_code=201)
+def create_plan_entry(payload: schemas.PlanEntryCreate, db: Session = Depends(get_db)):
+    project = db.get(models.Project, payload.project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    entry = models.PlanEntry(
+        project_id=payload.project_id,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        name=payload.name,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.get("/api/plan/entries", response_model=list[schemas.PlanEntryOut])
+def list_plan_entries(
+    project_id: Optional[int] = None,
+    from_: Optional[datetime] = Query(None, alias="from"),
+    to: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.PlanEntry)
+    if project_id is not None:
+        query = query.filter(models.PlanEntry.project_id == project_id)
+    if from_ is not None:
+        query = query.filter(models.PlanEntry.end_time >= from_)
+    if to is not None:
+        query = query.filter(models.PlanEntry.start_time < to)
+    return query.order_by(models.PlanEntry.start_time.asc()).all()
+
+
+@app.post(
+    "/api/plan/entries/{entry_id}/changes",
+    response_model=schemas.PlanChangeOut,
+    status_code=201,
+)
+def create_plan_change(
+    entry_id: int, payload: schemas.PlanChangeCreate, db: Session = Depends(get_db)
+):
+    entry = db.get(models.PlanEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Plan entry not found")
+
+    change = models.PlanChange(
+        plan_entry_id=entry_id,
+        change_type=payload.change_type,
+        new_start_time=payload.new_start_time,
+        new_end_time=payload.new_end_time,
+    )
+    db.add(change)
+    db.commit()
+    db.refresh(change)
+    return change
+
+
+def _latest_changes_by_entry(db: Session, entry_ids: list[int]) -> dict[int, models.PlanChange]:
+    if not entry_ids:
+        return {}
+    changes = (
+        db.query(models.PlanChange)
+        .filter(models.PlanChange.plan_entry_id.in_(entry_ids))
+        .order_by(models.PlanChange.created_at.asc())
+        .all()
+    )
+    latest: dict[int, models.PlanChange] = {}
+    for change in changes:
+        latest[change.plan_entry_id] = change
+    return latest
+
+
+@app.get("/api/plan/dynamic", response_model=list[schemas.DynamicPlanEntryOut])
+def get_dynamic_plan(
+    project_id: Optional[int] = None,
+    from_: Optional[datetime] = Query(None, alias="from"),
+    to: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.PlanEntry)
+    if project_id is not None:
+        query = query.filter(models.PlanEntry.project_id == project_id)
+    entries = query.all()
+
+    latest_changes = _latest_changes_by_entry(db, [e.id for e in entries])
+
+    result = []
+    for entry in entries:
+        change = latest_changes.get(entry.id)
+        if change is not None and change.change_type == "cancel":
+            continue
+        start_time = entry.start_time
+        end_time = entry.end_time
+        if change is not None and change.change_type == "move":
+            start_time = change.new_start_time
+            end_time = change.new_end_time
+
+        if from_ is not None and end_time < from_:
+            continue
+        if to is not None and start_time >= to:
+            continue
+
+        result.append(
+            schemas.DynamicPlanEntryOut(
+                id=entry.id,
+                project_id=entry.project_id,
+                start_time=start_time,
+                end_time=end_time,
+                name=entry.name,
+            )
+        )
+
+    result.sort(key=lambda e: e.start_time)
+    return result
