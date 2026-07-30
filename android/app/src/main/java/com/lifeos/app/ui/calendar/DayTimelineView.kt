@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -31,10 +29,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.lifeos.app.R
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.Event
 import com.lifeos.app.data.Project
@@ -190,11 +190,13 @@ fun DayTimelineView(
             val xFraction = pseudoRandomFraction(marker.event.id)
             val iconX = CONTENT_START_DP.dp + (contentWidth - INSTANT_ICON_SIZE) * xFraction
             Icon(
-                imageVector = Icons.Default.Star,
+                painter = painterResource(R.drawable.ic_instant_sparkle),
                 contentDescription = null,
                 tint = color,
+                // Lowered so the line crosses through the middle of the icon's bottom
+                // ray, rather than merging with its horizontal side spikes.
                 modifier = Modifier
-                    .offset(x = iconX, y = top - INSTANT_ICON_SIZE / 2)
+                    .offset(x = iconX, y = top - INSTANT_ICON_SIZE * 3 / 4)
                     .size(INSTANT_ICON_SIZE),
             )
         }
