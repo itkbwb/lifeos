@@ -1,5 +1,7 @@
 package com.lifeos.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,9 +23,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.lifeos.app.data.ApiFactory
+import java.time.ZonedDateTime
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(
@@ -32,6 +41,9 @@ fun SettingsScreen(
     accessClientSecretMasked: String,
     connectionStatus: String,
     appVersion: String,
+    serverUrl: String,
+    accessClientId: String,
+    accessClientSecret: String,
     onSave: (String) -> Unit,
     onSaveAccessCredentials: (String, String) -> Unit,
     onTestConnection: () -> Unit,
@@ -39,6 +51,33 @@ fun SettingsScreen(
     onUpdateNow: () -> Unit,
     updateStatus: String,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var importStatus by remember { mutableStateOf("") }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            importStatus = "Импорт…"
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val csvText = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: throw IllegalStateException("не удалось открыть файл")
+                    val tzOffsetMinutes = ZonedDateTime.now().offset.totalSeconds / 60
+                    ApiFactory.importCsv(serverUrl, accessClientId, accessClientSecret, csvText, tzOffsetMinutes)
+                }
+            }
+            result.fold(
+                onSuccess = { r ->
+                    importStatus = buildString {
+                        append("Импортировано записей: ${r.created}")
+                        if (r.projects_created.isNotEmpty()) append(", новых проектов: ${r.projects_created.size}")
+                        if (r.errors.isNotEmpty()) append(", ошибок: ${r.errors.size} (строка ${r.errors.first().row}: ${r.errors.first().message})")
+                    }
+                },
+                onFailure = { importStatus = "Не удалось импортировать" },
+            )
+        }
+    }
     var editingToken by remember { mutableStateOf(false) }
 
     var url by remember(currentUrl) { mutableStateOf(currentUrl) }
@@ -125,6 +164,21 @@ fun SettingsScreen(
         }
         Spacer(Modifier.height(8.dp))
         Text(updateStatus)
+
+        Spacer(Modifier.height(32.dp))
+        Divider()
+        Spacer(Modifier.height(16.dp))
+        Text("Импорт (chapter 5.11)")
+        Spacer(Modifier.height(8.dp))
+        Text("CSV с колонками: project,date,start,end,title")
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = { importLauncher.launch(arrayOf("text/*", "text/csv", "*/*")) }) {
+            Text("Выбрать CSV")
+        }
+        if (importStatus.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(importStatus)
+        }
 
         Spacer(Modifier.height(32.dp))
         Divider()

@@ -254,3 +254,31 @@ def test_delete_project_without_events_still_works(client):
     project = _make_project(client)
     resp = client.delete(f"/api/projects/{project['id']}")
     assert resp.status_code == 204
+
+
+def test_delete_event(client):
+    project = _make_project(client)
+    event = client.post("/api/events", json={"project_id": project["id"], "type": "instant"}).json()
+
+    resp = client.delete(f"/api/events/{event['id']}")
+    assert resp.status_code == 204
+    assert client.get("/api/events").json() == []
+
+
+def test_delete_event_missing_404(client):
+    resp = client.delete("/api/events/9999")
+    assert resp.status_code == 404
+
+
+def test_delete_event_clears_correction_links(client):
+    project = _make_project(client)
+    event = client.post("/api/events", json={"project_id": project["id"], "type": "instant"}).json()
+    corrected = client.post(f"/api/events/{event['id']}/correct", json={"label": "fixed"}).json()
+
+    resp = client.delete(f"/api/events/{event['id']}")
+    assert resp.status_code == 204
+
+    remaining = client.get("/api/events").json()
+    assert len(remaining) == 1
+    assert remaining[0]["id"] == corrected["id"]
+    assert remaining[0]["corrects_id"] is None

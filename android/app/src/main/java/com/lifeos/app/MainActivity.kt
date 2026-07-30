@@ -177,6 +177,9 @@ private fun LifeOsRoot(
                     accessClientSecretMasked = settingsStore.accessClientSecretMasked(),
                     connectionStatus = connectionStatus,
                     appVersion = BuildConfig.VERSION_NAME,
+                    serverUrl = serverUrl,
+                    accessClientId = accessClientId,
+                    accessClientSecret = accessClientSecret,
                     onSave = { url -> scope.launch { settingsStore.setServerUrl(url) } },
                     onSaveAccessCredentials = { id, secret -> settingsStore.setAccessCredentials(id, secret) },
                     onTestConnection = {

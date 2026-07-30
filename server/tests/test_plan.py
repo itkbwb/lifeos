@@ -229,3 +229,157 @@ def test_invalid_change_type_rejected(client):
 def test_change_missing_entry_404(client):
     resp = client.post("/api/plan/entries/9999/changes", json={"change_type": "cancel"})
     assert resp.status_code == 404
+
+
+def test_update_plan_entry_mutates_static_directly(client):
+    project = _make_project(client)
+    entry = client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T11:00:00Z",
+        },
+    ).json()
+
+    resp = client.patch(f"/api/plan/entries/{entry['id']}", json={"name": "Renamed"})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Renamed"
+
+    static = client.get("/api/plan/entries").json()
+    assert static[0]["name"] == "Renamed"
+
+
+def test_update_plan_entry_end_before_start_rejected(client):
+    project = _make_project(client)
+    entry = client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T11:00:00Z",
+        },
+    ).json()
+    resp = client.patch(
+        f"/api/plan/entries/{entry['id']}", json={"end_time": "2026-08-01T08:00:00Z"}
+    )
+    assert resp.status_code == 422
+
+
+def test_update_plan_entry_missing_404(client):
+    resp = client.patch("/api/plan/entries/9999", json={"name": "x"})
+    assert resp.status_code == 404
+
+
+def test_delete_plan_entry(client):
+    project = _make_project(client)
+    entry = client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T11:00:00Z",
+        },
+    ).json()
+
+    resp = client.delete(f"/api/plan/entries/{entry['id']}")
+    assert resp.status_code == 204
+    assert client.get("/api/plan/entries").json() == []
+
+
+def test_delete_plan_entry_missing_404(client):
+    resp = client.delete("/api/plan/entries/9999")
+    assert resp.status_code == 404
+
+
+def test_delete_plan_change_reverts_dynamic(client):
+    project = _make_project(client)
+    entry = client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T09:00:00Z",
+            "end_time": "2026-08-01T11:00:00Z",
+        },
+    ).json()
+    change = client.post(
+        f"/api/plan/entries/{entry['id']}/changes",
+        json={
+            "change_type": "move",
+            "new_start_time": "2026-08-01T13:00:00Z",
+            "new_end_time": "2026-08-01T15:00:00Z",
+        },
+    ).json()
+
+    resp = client.delete(f"/api/plan/changes/{change['id']}")
+    assert resp.status_code == 204
+
+    dynamic = client.get("/api/plan/dynamic").json()
+    assert dynamic[0]["start_time"] == "2026-08-01T09:00:00Z"
+
+
+def test_delete_plan_change_missing_404(client):
+    resp = client.delete("/api/plan/changes/9999")
+    assert resp.status_code == 404
+
+
+def test_import_csv_creates_static_entries_and_projects(client):
+    csv_text = (
+        "project,date,start,end,title\n"
+        "Deep work,2026-08-01,09:00,11:00,Focus block\n"
+        "Deep work,2026-08-02,09:00,10:00,\n"
+        "Errands,2026-08-01,12:00,13:00,Groceries\n"
+    )
+    resp = client.post("/api/import/csv", json={"csv": csv_text, "tz_offset_minutes": 0})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["created"] == 3
+    assert set(body["projects_created"]) == {"Deep work", "Errands"}
+    assert body["errors"] == []
+
+    static = client.get("/api/plan/entries").json()
+    assert len(static) == 3
+    assert {e["name"] for e in static} == {"Focus block", "Groceries", None}
+
+    projects = client.get("/api/projects").json()
+    assert {p["name"] for p in projects} == {"Deep work", "Errands"}
+
+
+def test_import_csv_reuses_existing_project(client):
+    project = _make_project(client)
+    csv_text = f"project,date,start,end,title\n{project['name']},2026-08-01,09:00,11:00,\n"
+    resp = client.post("/api/import/csv", json={"csv": csv_text})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["created"] == 1
+    assert body["projects_created"] == []
+
+    projects = client.get("/api/projects").json()
+    assert len(projects) == 1
+
+
+def test_import_csv_bad_row_reports_error_but_continues(client):
+    csv_text = (
+        "project,date,start,end,title\n"
+        "Deep work,2026-08-01,11:00,09:00,bad row\n"
+        "Deep work,2026-08-02,09:00,10:00,\n"
+    )
+    resp = client.post("/api/import/csv", json={"csv": csv_text})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["created"] == 1
+    assert len(body["errors"]) == 1
+    assert body["errors"][0]["row"] == 2
+
+
+def test_import_csv_missing_columns_422(client):
+    resp = client.post("/api/import/csv", json={"csv": "project,date\nx,2026-08-01\n"})
+    assert resp.status_code == 422
+
+
+def test_import_csv_tz_offset_applied(client):
+    csv_text = "project,date,start,end,title\nDeep work,2026-08-01,09:00,10:00,\n"
+    resp = client.post("/api/import/csv", json={"csv": csv_text, "tz_offset_minutes": 180})
+    assert resp.status_code == 200
+    static = client.get("/api/plan/entries").json()
+    assert static[0]["start_time"] == "2026-08-01T06:00:00Z"

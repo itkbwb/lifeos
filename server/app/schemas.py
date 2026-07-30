@@ -194,3 +194,38 @@ class DynamicPlanEntryOut(BaseModel):
     start_time: datetime
     end_time: datetime
     name: Optional[str]
+
+
+class PlanEntryUpdate(BaseModel):
+    """Direct mutation of a Static Plan entry (chapter 5.7 - unlike a PlanChange,
+    this is a correction to the record itself, used from the Static tab of Day
+    Summary). All fields optional/partial; only provided ones are applied."""
+
+    project_id: Optional[int] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    name: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_blank_to_none(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        return v or None
+
+
+class ImportRequest(BaseModel):
+    csv: str
+    tz_offset_minutes: int = 0
+
+
+class ImportRowError(BaseModel):
+    row: int
+    message: str
+
+
+class ImportResult(BaseModel):
+    created: int
+    projects_created: list[str]
+    errors: list[ImportRowError]

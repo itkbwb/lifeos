@@ -206,11 +206,32 @@ object ApiFactory {
             .post(json.toRequestBody(jsonMediaType))
         addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
         client.newCall(requestBuilder.build()).execute().use { response ->
+            val body = response.body?.string()
+            if (response.code == 409) {
+                throw parseActiveConflict(body) ?: IOException("correctEvent conflict: HTTP 409")
+            }
             if (!response.isSuccessful) {
                 throw IOException("correctEvent failed: HTTP ${response.code}")
             }
-            val body = response.body?.string() ?: throw IOException("correctEvent: empty response body")
-            return gson.fromJson(body, Event::class.java)
+            return gson.fromJson(body ?: throw IOException("correctEvent: empty response body"), Event::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun deleteEvent(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        eventId: Int,
+    ) {
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/events/$eventId")
+            .delete()
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("deleteEvent failed: HTTP ${response.code}")
+            }
         }
     }
 
@@ -303,7 +324,7 @@ object ApiFactory {
         changeType: String,
         newStartTime: String? = null,
         newEndTime: String? = null,
-    ) {
+    ): PlanChange {
         val fields = mutableMapOf<String, Any>("change_type" to changeType)
         newStartTime?.let { fields["new_start_time"] = it }
         newEndTime?.let { fields["new_end_time"] = it }
@@ -316,6 +337,99 @@ object ApiFactory {
             if (!response.isSuccessful) {
                 throw IOException("createPlanChange failed: HTTP ${response.code}")
             }
+            val body = response.body?.string() ?: throw IOException("createPlanChange: empty response body")
+            return gson.fromJson(body, PlanChange::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun deletePlanChange(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        changeId: Int,
+    ) {
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/plan/changes/$changeId")
+            .delete()
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("deletePlanChange failed: HTTP ${response.code}")
+            }
+        }
+    }
+
+    /**
+     * Blocking call - run on a background dispatcher. Throws IOException on failure. A direct
+     * mutation of a Static Plan entry (chapter 5.7), distinct from [createPlanChange].
+     */
+    fun updatePlanEntry(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        id: Int,
+        projectId: Int? = null,
+        startTime: String? = null,
+        endTime: String? = null,
+        name: String? = null,
+    ): PlanEntry {
+        val fields = mutableMapOf<String, Any>()
+        projectId?.let { fields["project_id"] = it }
+        startTime?.let { fields["start_time"] = it }
+        endTime?.let { fields["end_time"] = it }
+        name?.let { fields["name"] = it }
+        val json = gson.toJson(fields)
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/plan/entries/$id")
+            .patch(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("updatePlanEntry failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("updatePlanEntry: empty response body")
+            return gson.fromJson(body, PlanEntry::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun deletePlanEntry(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        id: Int,
+    ) {
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/plan/entries/$id")
+            .delete()
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("deletePlanEntry failed: HTTP ${response.code}")
+            }
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun importCsv(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        csv: String,
+        tzOffsetMinutes: Int,
+    ): ImportResult {
+        val json = gson.toJson(mapOf("csv" to csv, "tz_offset_minutes" to tzOffsetMinutes))
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/import/csv")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            val body = response.body?.string()
+            if (!response.isSuccessful) {
+                throw IOException("importCsv failed: HTTP ${response.code} $body")
+            }
+            return gson.fromJson(body ?: throw IOException("importCsv: empty response body"), ImportResult::class.java)
         }
     }
 

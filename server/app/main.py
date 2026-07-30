@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import csv
+import io
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -245,6 +247,15 @@ def correct_event(event_id: int, payload: schemas.EventCorrect, db: Session = De
     return corrected
 
 
+@app.delete("/api/events/{event_id}", status_code=204)
+def delete_event(event_id: int, db: Session = Depends(get_db)):
+    event = db.get(models.Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    db.delete(event)
+    db.commit()
+
+
 @app.post("/api/plan/entries", response_model=schemas.PlanEntryOut, status_code=201)
 def create_plan_entry(payload: schemas.PlanEntryCreate, db: Session = Depends(get_db)):
     project = db.get(models.Project, payload.project_id)
@@ -280,6 +291,45 @@ def list_plan_entries(
     return query.order_by(models.PlanEntry.start_time.asc()).all()
 
 
+@app.patch("/api/plan/entries/{entry_id}", response_model=schemas.PlanEntryOut)
+def update_plan_entry(
+    entry_id: int, payload: schemas.PlanEntryUpdate, db: Session = Depends(get_db)
+):
+    """Direct mutation of a Static Plan entry (chapter 5.7) - a data-entry
+    correction, distinct from a PlanChange (which records a real-world
+    reschedule and only ever touches the Dynamic Plan)."""
+    entry = db.get(models.PlanEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Plan entry not found")
+
+    new_project_id = payload.project_id if payload.project_id is not None else entry.project_id
+    new_start_time = payload.start_time if payload.start_time is not None else entry.start_time
+    new_end_time = payload.end_time if payload.end_time is not None else entry.end_time
+    new_name = payload.name if "name" in payload.model_fields_set else entry.name
+
+    if new_end_time <= new_start_time:
+        raise HTTPException(status_code=422, detail="end_time must be after start_time")
+    if db.get(models.Project, new_project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    entry.project_id = new_project_id
+    entry.start_time = new_start_time
+    entry.end_time = new_end_time
+    entry.name = new_name
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.delete("/api/plan/entries/{entry_id}", status_code=204)
+def delete_plan_entry(entry_id: int, db: Session = Depends(get_db)):
+    entry = db.get(models.PlanEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Plan entry not found")
+    db.delete(entry)
+    db.commit()
+
+
 @app.post(
     "/api/plan/entries/{entry_id}/changes",
     response_model=schemas.PlanChangeOut,
@@ -302,6 +352,17 @@ def create_plan_change(
     db.commit()
     db.refresh(change)
     return change
+
+
+@app.delete("/api/plan/changes/{change_id}", status_code=204)
+def delete_plan_change(change_id: int, db: Session = Depends(get_db)):
+    """Undo a PlanChange (chapter 5.10) - removing it restores the Dynamic Plan
+    to whatever the next-latest change (or the Static entry itself) says."""
+    change = db.get(models.PlanChange, change_id)
+    if change is None:
+        raise HTTPException(status_code=404, detail="Plan change not found")
+    db.delete(change)
+    db.commit()
 
 
 def _latest_changes_by_entry(db: Session, entry_ids: list[int]) -> dict[int, models.PlanChange]:
@@ -361,3 +422,71 @@ def get_dynamic_plan(
 
     result.sort(key=lambda e: e.start_time)
     return result
+
+
+_IMPORT_COLORS = sorted(schemas.PROJECT_COLORS)
+
+
+@app.post("/api/import/csv", response_model=schemas.ImportResult)
+def import_csv(payload: schemas.ImportRequest, db: Session = Depends(get_db)):
+    """Import creates only Static records (chapter 5.11); missing projects are
+    created automatically, and no source information is stored. Columns:
+    project,date,start,end,title (title optional). date=YYYY-MM-DD,
+    start/end=HH:MM, interpreted at tz_offset_minutes."""
+    tz = timezone(timedelta(minutes=payload.tz_offset_minutes))
+
+    projects_by_name: dict[str, models.Project] = {
+        p.name: p for p in db.query(models.Project).all()
+    }
+    projects_created: list[str] = []
+    errors: list[schemas.ImportRowError] = []
+    created = 0
+
+    reader = csv.DictReader(io.StringIO(payload.csv))
+    if reader.fieldnames is None:
+        raise HTTPException(status_code=422, detail="CSV has no header row")
+    missing = {"project", "date", "start", "end"} - {f.strip() for f in reader.fieldnames}
+    if missing:
+        raise HTTPException(status_code=422, detail=f"CSV missing columns: {sorted(missing)}")
+
+    for row_num, row in enumerate(reader, start=2):
+        try:
+            project_name = (row.get("project") or "").strip()
+            if not project_name:
+                raise ValueError("project must not be empty")
+            date_str = (row.get("date") or "").strip()
+            start_str = (row.get("start") or "").strip()
+            end_str = (row.get("end") or "").strip()
+            title = (row.get("title") or "").strip() or None
+
+            date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            start_time_local = datetime.strptime(start_str, "%H:%M").time()
+            end_time_local = datetime.strptime(end_str, "%H:%M").time()
+            start_dt = datetime.combine(date, start_time_local, tzinfo=tz)
+            end_dt = datetime.combine(date, end_time_local, tzinfo=tz)
+            if end_dt <= start_dt:
+                raise ValueError("end must be after start")
+
+            project = projects_by_name.get(project_name)
+            if project is None:
+                color = _IMPORT_COLORS[len(projects_by_name) % len(_IMPORT_COLORS)]
+                project = models.Project(name=project_name, color=color)
+                db.add(project)
+                db.flush()
+                projects_by_name[project_name] = project
+                projects_created.append(project_name)
+
+            db.add(
+                models.PlanEntry(
+                    project_id=project.id,
+                    start_time=start_dt,
+                    end_time=end_dt,
+                    name=title,
+                )
+            )
+            created += 1
+        except (ValueError, KeyError) as exc:
+            errors.append(schemas.ImportRowError(row=row_num, message=str(exc)))
+
+    db.commit()
+    return schemas.ImportResult(created=created, projects_created=projects_created, errors=errors)

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,6 +38,7 @@ fun CalendarScreen(
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var scaleMenuExpanded by remember { mutableStateOf(false) }
     var dayListMode by remember { mutableStateOf(false) }
+    var showDaySummary by remember { mutableStateOf(false) }
     var projects by remember { mutableStateOf<List<Project>>(emptyList()) }
 
     LaunchedEffect(serverUrl) {
@@ -68,6 +70,9 @@ fun CalendarScreen(
                                 imageVector = if (dayListMode) Icons.Filled.DateRange else Icons.AutoMirrored.Filled.List,
                                 contentDescription = if (dayListMode) "Показать таймлайн" else "Показать списком",
                             )
+                        }
+                        IconButton(onClick = { showDaySummary = true }) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Редактировать день")
                         }
                     }
                 },
@@ -129,5 +134,16 @@ fun CalendarScreen(
                 modifier = Modifier.padding(padding),
             )
         }
+    }
+
+    if (showDaySummary) {
+        DaySummarySheet(
+            date = selectedDate,
+            projects = projects,
+            serverUrl = serverUrl,
+            accessClientId = accessClientId,
+            accessClientSecret = accessClientSecret,
+            onDismiss = { showDaySummary = false },
+        )
     }
 }

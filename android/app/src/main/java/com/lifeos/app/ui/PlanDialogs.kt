@@ -27,12 +27,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.lifeos.app.data.DynamicPlanEntry
+import com.lifeos.app.data.PlanEntry
 import com.lifeos.app.data.Project
 import com.lifeos.app.ui.theme.ProjectColors
+import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 
 @Composable
-private fun ProjectPicker(projects: List<Project>, selectedId: Int?, onSelect: (Int) -> Unit) {
+internal fun ProjectPicker(projects: List<Project>, selectedId: Int?, onSelect: (Int) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -129,6 +134,235 @@ fun StaticPlanFormDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+
+private val PLAN_DATE_FORMAT = java.time.format.DateTimeFormatter.ISO_LOCAL_DATE
+private val PLAN_TIME_FORMAT = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+
+@Composable
+private fun PlanEntryFields(
+    projects: List<Project>,
+    projectId: Int?,
+    onProjectSelect: (Int) -> Unit,
+    name: String,
+    onNameChange: (String) -> Unit,
+    dateText: String,
+    onDateChange: (String) -> Unit,
+    startText: String,
+    onStartChange: (String) -> Unit,
+    endText: String,
+    onEndChange: (String) -> Unit,
+    errorMessage: String,
+) {
+    Column {
+        ProjectPicker(projects, projectId, onSelect = onProjectSelect)
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = name,
+            onValueChange = onNameChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Название") },
+            placeholder = { Text("Необязательно") },
+        )
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = dateText,
+            onValueChange = onDateChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Дата") },
+            placeholder = { Text("2026-08-01") },
+        )
+        Spacer(Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedTextField(
+                value = startText,
+                onValueChange = onStartChange,
+                modifier = Modifier.fillMaxWidth(0.5f),
+                label = { Text("Начало") },
+                placeholder = { Text("09:00") },
+            )
+            OutlinedTextField(
+                value = endText,
+                onValueChange = onEndChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Конец") },
+                placeholder = { Text("10:00") },
+            )
+        }
+        if (errorMessage.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(errorMessage, color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/**
+ * Edits a Static Plan entry directly (chapter 5.7) - unlike rescheduling via a
+ * PlanChange, this mutates the record itself (a data-entry correction, not a
+ * real-world reschedule).
+ */
+@Composable
+fun PlanEntryEditDialog(
+    entry: PlanEntry,
+    projects: List<Project>,
+    errorMessage: String,
+    zone: ZoneId = ZoneId.systemDefault(),
+    onDismiss: () -> Unit,
+    onSave: (projectId: Int, start: Instant, end: Instant, name: String) -> Unit,
+    onRequestDelete: () -> Unit,
+) {
+    var projectId by remember(entry.id) { mutableStateOf<Int?>(entry.project_id) }
+    var name by remember(entry.id) { mutableStateOf(entry.name ?: "") }
+    val startZoned = remember(entry.id) { Instant.parse(entry.start_time).atZone(zone) }
+    val endZoned = remember(entry.id) { Instant.parse(entry.end_time).atZone(zone) }
+    var dateText by remember(entry.id) { mutableStateOf(PLAN_DATE_FORMAT.format(startZoned.toLocalDate())) }
+    var startText by remember(entry.id) { mutableStateOf(PLAN_TIME_FORMAT.format(startZoned.toLocalTime())) }
+    var endText by remember(entry.id) { mutableStateOf(PLAN_TIME_FORMAT.format(endZoned.toLocalTime())) }
+
+    val date = runCatching { LocalDate.parse(dateText, PLAN_DATE_FORMAT) }.getOrNull()
+    val startTime = runCatching { LocalTime.parse(startText, PLAN_TIME_FORMAT) }.getOrNull()
+    val endTime = runCatching { LocalTime.parse(endText, PLAN_TIME_FORMAT) }.getOrNull()
+    val isValid = projectId != null && date != null && startTime != null && endTime != null && endTime > startTime
+
+    val isDirty = projectId != entry.project_id ||
+        name != (entry.name ?: "") ||
+        dateText != PLAN_DATE_FORMAT.format(startZoned.toLocalDate()) ||
+        startText != PLAN_TIME_FORMAT.format(startZoned.toLocalTime()) ||
+        endText != PLAN_TIME_FORMAT.format(endZoned.toLocalTime())
+    var showDiscardConfirm by remember(entry.id) { mutableStateOf(false) }
+    val requestDismiss = { if (isDirty) showDiscardConfirm = true else onDismiss() }
+
+    if (showDiscardConfirm) {
+        DiscardChangesDialog(onDiscard = onDismiss, onKeepEditing = { showDiscardConfirm = false })
+    }
+
+    AlertDialog(
+        onDismissRequest = requestDismiss,
+        title = { Text("Изменить план") },
+        text = {
+            PlanEntryFields(
+                projects = projects,
+                projectId = projectId,
+                onProjectSelect = { projectId = it },
+                name = name,
+                onNameChange = { name = it },
+                dateText = dateText,
+                onDateChange = { dateText = it },
+                startText = startText,
+                onStartChange = { startText = it },
+                endText = endText,
+                onEndChange = { endText = it },
+                errorMessage = errorMessage,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = isValid,
+                onClick = {
+                    onSave(
+                        projectId!!,
+                        date!!.atTime(startTime!!).atZone(zone).toInstant(),
+                        date.atTime(endTime!!).atZone(zone).toInstant(),
+                        name.trim(),
+                    )
+                },
+            ) { Text("Сохранить") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onRequestDelete) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = requestDismiss) { Text("Отмена") }
+            }
+        },
+    )
+}
+
+/**
+ * Edits a Dynamic Plan entry (chapter 5.8). A start/end change is a real-world
+ * reschedule, so it creates a PlanChange (move) against the underlying Static
+ * entry rather than mutating it; project/name changes correct the Static
+ * entry itself (chapter 4.7 - color is project identity, not a schedule
+ * fact). Deleting creates a PlanChange (cancel), which per 5.9 never touches
+ * the Static record.
+ */
+@Composable
+fun DynamicEntryEditDialog(
+    entry: DynamicPlanEntry,
+    projects: List<Project>,
+    errorMessage: String,
+    zone: ZoneId = ZoneId.systemDefault(),
+    onDismiss: () -> Unit,
+    onSave: (projectId: Int, start: Instant, end: Instant, name: String) -> Unit,
+    onRequestDelete: () -> Unit,
+) {
+    var projectId by remember(entry.id) { mutableStateOf<Int?>(entry.project_id) }
+    var name by remember(entry.id) { mutableStateOf(entry.name ?: "") }
+    val startZoned = remember(entry.id) { Instant.parse(entry.start_time).atZone(zone) }
+    val endZoned = remember(entry.id) { Instant.parse(entry.end_time).atZone(zone) }
+    var dateText by remember(entry.id) { mutableStateOf(PLAN_DATE_FORMAT.format(startZoned.toLocalDate())) }
+    var startText by remember(entry.id) { mutableStateOf(PLAN_TIME_FORMAT.format(startZoned.toLocalTime())) }
+    var endText by remember(entry.id) { mutableStateOf(PLAN_TIME_FORMAT.format(endZoned.toLocalTime())) }
+
+    val date = runCatching { LocalDate.parse(dateText, PLAN_DATE_FORMAT) }.getOrNull()
+    val startTime = runCatching { LocalTime.parse(startText, PLAN_TIME_FORMAT) }.getOrNull()
+    val endTime = runCatching { LocalTime.parse(endText, PLAN_TIME_FORMAT) }.getOrNull()
+    val isValid = projectId != null && date != null && startTime != null && endTime != null && endTime > startTime
+
+    val isDirty = projectId != entry.project_id ||
+        name != (entry.name ?: "") ||
+        dateText != PLAN_DATE_FORMAT.format(startZoned.toLocalDate()) ||
+        startText != PLAN_TIME_FORMAT.format(startZoned.toLocalTime()) ||
+        endText != PLAN_TIME_FORMAT.format(endZoned.toLocalTime())
+    var showDiscardConfirm by remember(entry.id) { mutableStateOf(false) }
+    val requestDismiss = { if (isDirty) showDiscardConfirm = true else onDismiss() }
+
+    if (showDiscardConfirm) {
+        DiscardChangesDialog(onDiscard = onDismiss, onKeepEditing = { showDiscardConfirm = false })
+    }
+
+    AlertDialog(
+        onDismissRequest = requestDismiss,
+        title = { Text("Изменить (Dynamic)") },
+        text = {
+            PlanEntryFields(
+                projects = projects,
+                projectId = projectId,
+                onProjectSelect = { projectId = it },
+                name = name,
+                onNameChange = { name = it },
+                dateText = dateText,
+                onDateChange = { dateText = it },
+                startText = startText,
+                onStartChange = { startText = it },
+                endText = endText,
+                onEndChange = { endText = it },
+                errorMessage = errorMessage,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = isValid,
+                onClick = {
+                    onSave(
+                        projectId!!,
+                        date!!.atTime(startTime!!).atZone(zone).toInstant(),
+                        date.atTime(endTime!!).atZone(zone).toInstant(),
+                        name.trim(),
+                    )
+                },
+            ) { Text("Сохранить") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onRequestDelete) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = requestDismiss) { Text("Отмена") }
+            }
         },
     )
 }
