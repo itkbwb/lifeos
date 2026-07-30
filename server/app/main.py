@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import models, schemas
-from app.database import Base, engine, get_db
+from app.database import Base, engine, ensure_schema_migrations, get_db
 
 BASE_DIR = Path(__file__).resolve().parent
 VERSION = (BASE_DIR.parent / "VERSION").read_text(encoding="utf-8").strip()
@@ -19,6 +19,7 @@ VERSION = (BASE_DIR.parent / "VERSION").read_text(encoding="utf-8").strip()
 app = FastAPI(title="Life OS", version=VERSION)
 
 Base.metadata.create_all(bind=engine)
+ensure_schema_migrations()
 
 
 @app.get("/health")
@@ -62,16 +63,33 @@ def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session 
         project.name = payload.name
     if payload.color is not None:
         project.color = payload.color
+    if payload.archived is not None:
+        project.archived = payload.archived
     db.commit()
     db.refresh(project)
     return project
 
 
 @app.delete("/api/projects/{project_id}", status_code=204)
-def delete_project(project_id: int, db: Session = Depends(get_db)):
+def delete_project(project_id: int, force: bool = False, db: Session = Depends(get_db)):
     project = db.get(models.Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    if force:
+        # Clear the project's own Events/PlanEntries first (PlanEntry
+        # deletion cascades to its PlanChanges) so the RESTRICT FK no
+        # longer blocks deleting the project itself.
+        db.query(models.Event).filter(models.Event.project_id == project_id).delete(
+            synchronize_session=False
+        )
+        db.query(models.PlanEntry).filter(models.PlanEntry.project_id == project_id).delete(
+            synchronize_session=False
+        )
+        db.delete(project)
+        db.commit()
+        return
+
     db.delete(project)
     try:
         db.commit()
@@ -507,14 +525,15 @@ def clear_data(payload: schemas.ClearRequest, db: Session = Depends(get_db)):
     deleted_events = 0
     deleted_plan_entries = 0
     deleted_plan_changes = 0
+    deleted_projects = 0
 
-    if scope in ("timeline", "all"):
+    if scope in ("timeline", "all", "projects"):
         deleted_events += (
             db.query(models.Event)
             .filter(models.Event.type.in_(["start", "end"]))
             .delete(synchronize_session=False)
         )
-    if scope in ("instant", "all"):
+    if scope in ("instant", "all", "projects"):
         deleted_events += (
             db.query(models.Event)
             .filter(models.Event.type == "instant")
@@ -522,15 +541,20 @@ def clear_data(payload: schemas.ClearRequest, db: Session = Depends(get_db)):
         )
     if scope == "dynamic":
         deleted_plan_changes += db.query(models.PlanChange).delete(synchronize_session=False)
-    if scope in ("static", "static_and_dynamic", "all"):
+    if scope in ("static", "static_and_dynamic", "all", "projects"):
         # PlanEntry deletion cascades to its PlanChanges at the DB level (see
         # database.py's foreign_keys=ON pragma) - count them first to report.
         deleted_plan_changes += db.query(models.PlanChange).count()
         deleted_plan_entries += db.query(models.PlanEntry).delete(synchronize_session=False)
+    if scope == "projects":
+        # Events/PlanEntries above are already cleared this same transaction,
+        # so the RESTRICT FK from either table no longer blocks this delete.
+        deleted_projects += db.query(models.Project).delete(synchronize_session=False)
 
     db.commit()
     return schemas.ClearResult(
         deleted_events=deleted_events,
         deleted_plan_entries=deleted_plan_entries,
         deleted_plan_changes=deleted_plan_changes,
+        deleted_projects=deleted_projects,
     )

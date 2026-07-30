@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,11 +44,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Restore
 import com.lifeos.app.R
 import com.lifeos.app.data.ActiveProject
 import com.lifeos.app.data.ActiveProjectConflictException
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.Project
+import com.lifeos.app.data.ProjectHasRecordsException
 import com.lifeos.app.ui.theme.ProjectColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -60,6 +65,7 @@ private sealed class DialogState {
     object Create : DialogState()
     data class Edit(val project: Project) : DialogState()
     data class ConfirmDelete(val project: Project) : DialogState()
+    data class DeleteOrArchive(val project: Project) : DialogState()
     data class StartPrompt(val project: Project) : DialogState()
     data class InstantPrompt(val project: Project) : DialogState()
     data class StartConflict(val newProject: Project, val name: String, val active: ActiveProject) : DialogState()
@@ -79,6 +85,7 @@ fun ProjectsScreen(
     var refreshToken by remember { mutableStateOf(0) }
     var dialogState by remember { mutableStateOf<DialogState>(DialogState.None) }
     var dialogError by remember { mutableStateOf("") }
+    var showArchived by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -189,32 +196,78 @@ fun ProjectsScreen(
                 }
             }
 
-            LoadState.Loaded -> LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(projects, key = { it.id }) { project ->
-                    ProjectTile(
-                        project = project,
-                        isActive = activeProject?.project_id == project.id,
-                        onClick = {
-                            dialogError = ""
-                            dialogState = DialogState.Edit(project)
-                        },
-                        onToggleActive = {
-                            if (activeProject?.project_id == project.id) {
-                                endProject(project.id)
-                            } else {
+            LoadState.Loaded -> {
+                val activeProjects = projects.filter { !it.archived }
+                val archivedProjects = projects.filter { it.archived }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(activeProjects, key = { it.id }) { project ->
+                        ProjectTile(
+                            project = project,
+                            isActive = activeProject?.project_id == project.id,
+                            onClick = {
+                                dialogError = ""
+                                dialogState = DialogState.Edit(project)
+                            },
+                            onStart = {
                                 dialogError = ""
                                 dialogState = DialogState.StartPrompt(project)
+                            },
+                            onStop = { endProject(project.id) },
+                            onInstant = {
+                                dialogError = ""
+                                dialogState = DialogState.InstantPrompt(project)
+                            },
+                        )
+                    }
+
+                    if (archivedProjects.isNotEmpty()) {
+                        item(key = "archive-toggle") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showArchived = !showArchived }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "Архив (${archivedProjects.size})",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Icon(
+                                    imageVector = if (showArchived) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                    contentDescription = null,
+                                )
                             }
-                        },
-                        onInstant = {
-                            dialogError = ""
-                            dialogState = DialogState.InstantPrompt(project)
-                        },
-                    )
+                        }
+                        if (showArchived) {
+                            items(archivedProjects, key = { it.id }) { project ->
+                                ArchivedProjectRow(
+                                    project = project,
+                                    onClick = {
+                                        dialogError = ""
+                                        dialogState = DialogState.Edit(project)
+                                    },
+                                    onRestore = {
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                runCatching {
+                                                    ApiFactory.updateProject(
+                                                        serverUrl, accessClientId, accessClientSecret,
+                                                        id = project.id, archived = false,
+                                                    )
+                                                }
+                                            }.onSuccess { refreshToken++ }
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -274,6 +327,25 @@ fun ProjectsScreen(
                 }
             },
             onRequestDelete = { dialogState = DialogState.ConfirmDelete(state.project) },
+            onToggleArchive = {
+                val target = state.project
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.updateProject(
+                                serverUrl, accessClientId, accessClientSecret,
+                                id = target.id, archived = !target.archived,
+                            )
+                        }
+                    }.fold(
+                        onSuccess = {
+                            dialogState = DialogState.None
+                            refreshToken++
+                        },
+                        onFailure = { dialogError = "Не удалось изменить статус архива" },
+                    )
+                }
+            },
         )
 
         is DialogState.StartPrompt -> StartNameDialog(
@@ -342,6 +414,53 @@ fun ProjectsScreen(
                             dialogState = DialogState.None
                             refreshToken++
                         },
+                        onFailure = { e ->
+                            if (e is ProjectHasRecordsException) {
+                                dialogState = DialogState.DeleteOrArchive(state.project)
+                            } else {
+                                dialogError = "Не удалось удалить проект"
+                            }
+                        },
+                    )
+                }
+            },
+        )
+
+        is DialogState.DeleteOrArchive -> DeleteOrArchiveDialog(
+            projectName = state.project.name,
+            onCancel = { dialogState = DialogState.Edit(state.project) },
+            onArchive = {
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.updateProject(
+                                serverUrl, accessClientId, accessClientSecret,
+                                id = state.project.id, archived = true,
+                            )
+                        }
+                    }.fold(
+                        onSuccess = {
+                            dialogState = DialogState.None
+                            refreshToken++
+                        },
+                        onFailure = { dialogError = "Не удалось архивировать проект" },
+                    )
+                }
+            },
+            onDeleteAll = {
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.deleteProject(
+                                serverUrl, accessClientId, accessClientSecret,
+                                id = state.project.id, force = true,
+                            )
+                        }
+                    }.fold(
+                        onSuccess = {
+                            dialogState = DialogState.None
+                            refreshToken++
+                        },
                         onFailure = { dialogError = "Не удалось удалить проект" },
                     )
                 }
@@ -355,11 +474,17 @@ private fun ProjectTile(
     project: Project,
     isActive: Boolean,
     onClick: () -> Unit,
-    onToggleActive: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
     onInstant: () -> Unit,
 ) {
     val color = ProjectColors.colorFor(project.color)
     val onColor = ProjectColors.contrastingTextColor(color)
+    // Dimmed (not just "different icon") so it's visually obvious which of
+    // the two is actually usable right now - Stop only ever "lights up" for
+    // the one tile that is truly the active project (chapter: separate
+    // play/stop buttons), never for every tile at once.
+    val disabledTint = onColor.copy(alpha = 0.35f)
 
     Row(
         modifier = Modifier
@@ -377,11 +502,18 @@ private fun ProjectTile(
             color = onColor,
             modifier = Modifier.weight(1f),
         )
-        IconButton(onClick = onToggleActive) {
+        IconButton(onClick = onStart, enabled = !isActive) {
             Icon(
-                imageVector = if (isActive) Icons.Filled.Stop else Icons.Filled.PlayArrow,
-                contentDescription = if (isActive) "Завершить" else "Начать",
-                tint = onColor,
+                imageVector = Icons.Filled.PlayArrow,
+                contentDescription = "Начать",
+                tint = if (isActive) disabledTint else onColor,
+            )
+        }
+        IconButton(onClick = onStop, enabled = isActive) {
+            Icon(
+                imageVector = Icons.Filled.Stop,
+                contentDescription = "Завершить",
+                tint = if (isActive) onColor else disabledTint,
             )
         }
         IconButton(onClick = onInstant) {
@@ -389,6 +521,44 @@ private fun ProjectTile(
                 painter = painterResource(R.drawable.ic_instant_sparkle),
                 contentDescription = "Отметить",
                 tint = onColor,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ArchivedProjectRow(
+    project: Project,
+    onClick: () -> Unit,
+    onRestore: () -> Unit,
+) {
+    val color = ProjectColors.colorFor(project.color)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+            .clickable(onClick = onClick)
+            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(12.dp)
+                .clip(RoundedCornerShape(50))
+                .background(color),
+        )
+        Text(
+            text = project.name,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f).padding(start = 12.dp),
+        )
+        IconButton(onClick = onRestore) {
+            Icon(
+                imageVector = Icons.Filled.Restore,
+                contentDescription = "Восстановить",
             )
         }
     }

@@ -38,13 +38,17 @@ import java.time.ZoneId
 
 @Composable
 internal fun ProjectPicker(projects: List<Project>, selectedId: Int?, onSelect: (Int) -> Unit) {
+    // Archived projects don't belong among active pickers (chapter: archiving) -
+    // except the one already selected, so editing an old record referencing an
+    // archived project never loses its current selection.
+    val pickable = projects.filter { !it.archived || it.id == selectedId }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        projects.forEach { project ->
+        pickable.forEach { project ->
             val isSelected = project.id == selectedId
             Box(
                 modifier = Modifier

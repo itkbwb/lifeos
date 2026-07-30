@@ -227,7 +227,8 @@ fun SettingsScreen(
                     result.fold(
                         onSuccess = { r ->
                             clearStatus = "Удалено: событий ${r.deleted_events}, " +
-                                "записей плана ${r.deleted_plan_entries}, изменений плана ${r.deleted_plan_changes}"
+                                "записей плана ${r.deleted_plan_entries}, изменений плана ${r.deleted_plan_changes}" +
+                                if (r.deleted_projects > 0) ", проектов ${r.deleted_projects}" else ""
                         },
                         onFailure = { clearStatus = "Не удалось очистить" },
                     )
@@ -244,4 +245,5 @@ private val CLEAR_SCOPES = listOf(
     "instant" to "Instant",
     "static_and_dynamic" to "Static и Dynamic",
     "all" to "всё",
+    "projects" to "все проекты",
 )

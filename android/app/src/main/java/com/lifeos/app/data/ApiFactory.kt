@@ -76,10 +76,12 @@ object ApiFactory {
         id: Int,
         name: String? = null,
         color: String? = null,
+        archived: Boolean? = null,
     ): Project {
-        val fields = mutableMapOf<String, String>()
+        val fields = mutableMapOf<String, Any>()
         name?.let { fields["name"] = it }
         color?.let { fields["color"] = it }
+        archived?.let { fields["archived"] = it }
         val json = gson.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/projects/$id")
@@ -95,12 +97,27 @@ object ApiFactory {
     }
 
     /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
-    fun deleteProject(baseUrl: String, accessClientId: String = "", accessClientSecret: String = "", id: Int) {
+    /**
+     * Blocking call - run on a background dispatcher. Throws
+     * [ProjectHasRecordsException] on HTTP 409 (the project has Events or
+     * Plan entries and `force` was false), or IOException otherwise.
+     */
+    fun deleteProject(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        id: Int,
+        force: Boolean = false,
+    ) {
+        val query = if (force) "?force=true" else ""
         val requestBuilder = Request.Builder()
-            .url(normalize(baseUrl) + "api/projects/$id")
+            .url(normalize(baseUrl) + "api/projects/$id" + query)
             .delete()
         addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
         client.newCall(requestBuilder.build()).execute().use { response ->
+            if (response.code == 409) {
+                throw ProjectHasRecordsException()
+            }
             if (!response.isSuccessful) {
                 throw IOException("deleteProject failed: HTTP ${response.code}")
             }

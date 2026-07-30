@@ -5,4 +5,5 @@ data class Project(
     val name: String,
     val color: String,
     val created_at: String,
+    val archived: Boolean = false,
 )

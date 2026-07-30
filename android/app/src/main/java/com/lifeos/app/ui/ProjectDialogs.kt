@@ -108,6 +108,7 @@ fun ProjectEditDialog(
     onDismiss: () -> Unit,
     onSave: (name: String, color: String) -> Unit,
     onRequestDelete: () -> Unit,
+    onToggleArchive: () -> Unit,
 ) {
     var name by remember(project.id) { mutableStateOf(project.name) }
     var color by remember(project.id) { mutableStateOf(project.color) }
@@ -130,8 +131,13 @@ fun ProjectEditDialog(
                     Text(errorMessage, color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.height(16.dp))
-                TextButton(onClick = onRequestDelete) {
-                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = onToggleArchive) {
+                        Text(if (project.archived) "Восстановить" else "Архивировать")
+                    }
+                    TextButton(onClick = onRequestDelete) {
+                        Text("Удалить", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         },
@@ -252,6 +258,37 @@ fun DeleteProjectConfirmDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+
+/**
+ * Shown when deleting a project fails because it has Events or Plan entries
+ * ([com.lifeos.app.data.ProjectHasRecordsException]) - offers archiving
+ * (keeps the project and all its records, just hides it from active
+ * pickers) as an alternative to force-deleting everything.
+ */
+@Composable
+fun DeleteOrArchiveDialog(
+    projectName: String,
+    onArchive: () -> Unit,
+    onDeleteAll: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("У «$projectName» есть события или планы") },
+        text = { Text("Удалить проект вместе со всеми его событиями и планами, или архивировать его — тогда всё сохранится, но проект уйдёт из списка активных.") },
+        confirmButton = {
+            TextButton(onClick = onDeleteAll) {
+                Text("Удалить всё", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onArchive) { Text("Архивировать") }
+                TextButton(onClick = onCancel) { Text("Отмена") }
+            }
         },
     )
 }

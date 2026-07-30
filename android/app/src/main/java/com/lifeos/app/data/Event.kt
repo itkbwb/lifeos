@@ -23,3 +23,5 @@ class ActiveProjectConflictException(
     val activeEventId: Int,
     val startedAt: String,
 ) : Exception("another project is already active")
+
+class ProjectHasRecordsException : Exception("project has events or plan entries; cannot delete without force")

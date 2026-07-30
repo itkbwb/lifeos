@@ -41,4 +41,5 @@ data class ClearResult(
     val deleted_events: Int,
     val deleted_plan_entries: Int,
     val deleted_plan_changes: Int,
+    val deleted_projects: Int = 0,
 )

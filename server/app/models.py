@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base, UTCDateTime
@@ -20,6 +20,10 @@ class Project(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    # Archived projects (chapter: archiving) drop out of active pickers but
+    # stay resolvable for historical Timeline/Static/Dynamic records that
+    # still reference them - never deleted, never hidden from GET /api/projects.
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class Event(Base):

@@ -63,3 +63,16 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def ensure_schema_migrations():
+    """`Base.metadata.create_all` only creates missing tables, never alters
+    existing ones - a new column on an already-existing table (like
+    `projects.archived`, added for project archiving) needs a manual,
+    idempotent ALTER TABLE here instead of a full migration framework,
+    matching this project's no-Alembic convention."""
+    with engine.connect() as conn:
+        columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(projects)").fetchall()}
+        if "archived" not in columns:
+            conn.exec_driver_sql("ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            conn.commit()

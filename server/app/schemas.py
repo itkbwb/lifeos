@@ -31,6 +31,7 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
+    archived: Optional[bool] = None
 
     @field_validator("name")
     @classmethod
@@ -59,6 +60,7 @@ class ProjectOut(BaseModel):
     name: str
     color: str
     created_at: datetime
+    archived: bool
 
 
 EVENT_TYPES = {"start", "end", "instant"}
@@ -231,7 +233,7 @@ class ImportResult(BaseModel):
     errors: list[ImportRowError]
 
 
-CLEAR_SCOPES = {"static", "dynamic", "timeline", "instant", "static_and_dynamic", "all"}
+CLEAR_SCOPES = {"static", "dynamic", "timeline", "instant", "static_and_dynamic", "all", "projects"}
 
 
 class ClearRequest(BaseModel):
@@ -240,7 +242,9 @@ class ClearRequest(BaseModel):
     `static`/`static_and_dynamic` delete PlanEntry rows, which cascades to
     their PlanChanges too. `timeline` deletes start/end events, `instant`
     deletes instant events. `all` clears every Event and PlanEntry (and,
-    via cascade, every PlanChange) but never touches Projects."""
+    via cascade, every PlanChange) but never touches Projects. `projects`
+    clears everything `all` does AND every Project too (Events/PlanEntries
+    would otherwise RESTRICT the project deletes)."""
 
     scope: str
 
@@ -256,3 +260,4 @@ class ClearResult(BaseModel):
     deleted_events: int
     deleted_plan_entries: int
     deleted_plan_changes: int
+    deleted_projects: int = 0

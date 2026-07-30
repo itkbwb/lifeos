@@ -591,3 +591,29 @@ def test_clear_all_wipes_everything_but_keeps_projects(client):
 def test_clear_invalid_scope_422(client):
     resp = client.post("/api/admin/clear", json={"scope": "bogus"})
     assert resp.status_code == 422
+
+
+def test_clear_projects_wipes_everything_including_projects(client):
+    _seed_everything(client)
+    resp = client.post("/api/admin/clear", json={"scope": "projects"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deleted_events"] == 3
+    assert body["deleted_plan_entries"] == 1
+    assert body["deleted_plan_changes"] == 1
+    assert body["deleted_projects"] == 1
+
+    assert client.get("/api/events").json() == []
+    assert client.get("/api/plan/entries").json() == []
+    assert client.get("/api/projects").json() == []
+
+
+def test_clear_projects_with_no_data_is_a_noop(client):
+    resp = client.post("/api/admin/clear", json={"scope": "projects"})
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "deleted_events": 0,
+        "deleted_plan_entries": 0,
+        "deleted_plan_changes": 0,
+        "deleted_projects": 0,
+    }
