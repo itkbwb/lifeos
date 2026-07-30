@@ -192,7 +192,7 @@ fun DayTimelineView(
                         text = block.name,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = ProjectColors.contrastingTextColor(color).copy(alpha = DYNAMIC_PLAN_ALPHA),
+                        color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.End,
