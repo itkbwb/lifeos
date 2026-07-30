@@ -1,6 +1,8 @@
 package com.lifeos.app.ui.calendar
 
+import com.lifeos.app.data.DynamicPlanEntry
 import com.lifeos.app.data.Event
+import com.lifeos.app.data.PlanEntry
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -96,3 +98,41 @@ fun layoutDay(events: List<Event>, date: LocalDate, zone: ZoneId = ZoneId.system
 
     return DayLayout(intervals, unfinished, instants)
 }
+
+/** A Plan layer's rendering span for one day (see chapter 4.6 - Static and Dynamic
+ * are drawn as separate layers from Timeline, but clip to day boundaries the same way
+ * intervals in [layoutDay] do).
+ */
+data class PlanBlockData(
+    val id: Int,
+    val projectId: Int,
+    val startTime: LocalTime,
+    val endTime: LocalTime,
+)
+
+private fun clipToDay(start: Instant, end: Instant, date: LocalDate, zone: ZoneId): Pair<LocalTime, LocalTime>? {
+    val startDate = start.atZone(zone).toLocalDate()
+    val endDate = end.atZone(zone).toLocalDate()
+    if (startDate > date || endDate < date) return null
+    val startTime = if (startDate == date) start.atZone(zone).toLocalTime() else LocalTime.MIDNIGHT
+    val endTime = if (endDate == date) end.atZone(zone).toLocalTime() else LocalTime.MAX
+    return startTime to endTime
+}
+
+/** Renders the Static Plan layer (chapter 4.6): the user's original, immutable intent. */
+fun layoutStaticPlan(entries: List<PlanEntry>, date: LocalDate, zone: ZoneId = ZoneId.systemDefault()): List<PlanBlockData> =
+    entries.mapNotNull { entry ->
+        val span = clipToDay(Instant.parse(entry.start_time), Instant.parse(entry.end_time), date, zone)
+        span?.let { (startTime, endTime) -> PlanBlockData(entry.id, entry.project_id, startTime, endTime) }
+    }
+
+/** Renders the Dynamic Plan layer (chapter 4.6): Static + changes, recomputed by the server. */
+fun layoutDynamicPlan(
+    entries: List<DynamicPlanEntry>,
+    date: LocalDate,
+    zone: ZoneId = ZoneId.systemDefault(),
+): List<PlanBlockData> =
+    entries.mapNotNull { entry ->
+        val span = clipToDay(Instant.parse(entry.start_time), Instant.parse(entry.end_time), date, zone)
+        span?.let { (startTime, endTime) -> PlanBlockData(entry.id, entry.project_id, startTime, endTime) }
+    }

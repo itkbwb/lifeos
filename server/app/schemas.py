@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 PROJECT_COLORS = {"lavender", "blue", "green", "yellow", "orange", "red", "pink", "gray"}
 
@@ -112,3 +112,74 @@ class ActiveProjectOut(BaseModel):
     project_id: int
     event_id: int
     started_at: datetime
+
+
+class PlanEntryCreate(BaseModel):
+    project_id: int
+    start_time: datetime
+    end_time: datetime
+
+    @field_validator("end_time")
+    @classmethod
+    def end_after_start(cls, v: datetime, info) -> datetime:
+        start = info.data.get("start_time")
+        if start is not None and v <= start:
+            raise ValueError("end_time must be after start_time")
+        return v
+
+
+class PlanEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    start_time: datetime
+    end_time: datetime
+    created_at: datetime
+
+
+PLAN_CHANGE_TYPES = {"move", "cancel"}
+
+
+class PlanChangeCreate(BaseModel):
+    change_type: str
+    new_start_time: Optional[datetime] = None
+    new_end_time: Optional[datetime] = None
+
+    @field_validator("change_type")
+    @classmethod
+    def change_type_in_types(cls, v: str) -> str:
+        if v not in PLAN_CHANGE_TYPES:
+            raise ValueError(f"change_type must be one of {sorted(PLAN_CHANGE_TYPES)}")
+        return v
+
+    @model_validator(mode="after")
+    def move_requires_both_times(self) -> "PlanChangeCreate":
+        if self.change_type == "move":
+            if self.new_start_time is None or self.new_end_time is None:
+                raise ValueError("move requires both new_start_time and new_end_time")
+            if self.new_end_time <= self.new_start_time:
+                raise ValueError("new_end_time must be after new_start_time")
+        return self
+
+
+class PlanChangeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    plan_entry_id: int
+    change_type: str
+    new_start_time: Optional[datetime]
+    new_end_time: Optional[datetime]
+    created_at: datetime
+
+
+class DynamicPlanEntryOut(BaseModel):
+    """A Static PlanEntry with the latest PlanChange (if any) applied.
+    Cancelled entries are omitted entirely (never returned by the endpoint).
+    """
+
+    id: int
+    project_id: int
+    start_time: datetime
+    end_time: datetime

@@ -32,4 +32,16 @@ object ProjectColors {
         val yiq = (blended.red * 255 * 299 + blended.green * 255 * 587 + blended.blue * 255 * 114) / 1000
         return if (yiq >= 128) Color.Black else Color.White
     }
+
+    /**
+     * A derived shade of a project color for the Static Plan outline (see chapter
+     * 4.6/4.7 - Static never fills, only outlines, in a tint distinct from the
+     * project's own solid color so it doesn't read as a second Timeline block).
+     * Lightens toward white on dark themes, darkens toward black on light themes,
+     * so the parameter is which theme is active rather than a hardcoded direction.
+     */
+    fun staticPlanOutlineColor(color: Color, isDarkTheme: Boolean = true): Color {
+        val target = if (isDarkTheme) Color.White else Color.Black
+        return lerp(color, target, 0.35f)
+    }
 }
