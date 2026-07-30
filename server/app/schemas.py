@@ -229,3 +229,30 @@ class ImportResult(BaseModel):
     created: int
     projects_created: list[str]
     errors: list[ImportRowError]
+
+
+CLEAR_SCOPES = {"static", "dynamic", "timeline", "instant", "static_and_dynamic", "all"}
+
+
+class ClearRequest(BaseModel):
+    """Bulk-wipe a data layer. `dynamic` deletes only PlanChange rows (the
+    Static entries they were layered on top of survive, per chapter 5.9);
+    `static`/`static_and_dynamic` delete PlanEntry rows, which cascades to
+    their PlanChanges too. `timeline` deletes start/end events, `instant`
+    deletes instant events. `all` clears every Event and PlanEntry (and,
+    via cascade, every PlanChange) but never touches Projects."""
+
+    scope: str
+
+    @field_validator("scope")
+    @classmethod
+    def scope_in_clear_scopes(cls, v: str) -> str:
+        if v not in CLEAR_SCOPES:
+            raise ValueError(f"scope must be one of {sorted(CLEAR_SCOPES)}")
+        return v
+
+
+class ClearResult(BaseModel):
+    deleted_events: int
+    deleted_plan_entries: int
+    deleted_plan_changes: int

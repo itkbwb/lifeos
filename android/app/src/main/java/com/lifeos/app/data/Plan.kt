@@ -36,3 +36,9 @@ data class ImportResult(
     val projects_created: List<String>,
     val errors: List<ImportRowError>,
 )
+
+data class ClearResult(
+    val deleted_events: Int,
+    val deleted_plan_entries: Int,
+    val deleted_plan_changes: Int,
+)

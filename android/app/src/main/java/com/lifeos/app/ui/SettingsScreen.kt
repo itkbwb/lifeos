@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -78,6 +80,9 @@ fun SettingsScreen(
             )
         }
     }
+    var clearStatus by remember { mutableStateOf("") }
+    var clearConfirmScope by remember { mutableStateOf<String?>(null) }
+
     var editingToken by remember { mutableStateOf(false) }
 
     var url by remember(currentUrl) { mutableStateOf(currentUrl) }
@@ -183,7 +188,60 @@ fun SettingsScreen(
         Spacer(Modifier.height(32.dp))
         Divider()
         Spacer(Modifier.height(16.dp))
+        Text("Очистка данных", color = MaterialTheme.colorScheme.error)
+        Spacer(Modifier.height(8.dp))
+        Text("Необратимо удаляет записи с сервера. Проекты не затрагиваются.")
+        Spacer(Modifier.height(12.dp))
+        CLEAR_SCOPES.forEach { (scope, label) ->
+            OutlinedButton(
+                onClick = { clearConfirmScope = scope },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Очистить: $label") }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (clearStatus.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(clearStatus)
+        }
+
+        Spacer(Modifier.height(32.dp))
+        Divider()
+        Spacer(Modifier.height(16.dp))
         Text("Версия $appVersion")
         Spacer(Modifier.height(24.dp))
     }
+
+    clearConfirmScope?.let { targetScope ->
+        val label = CLEAR_SCOPES.first { it.first == targetScope }.second
+        ConfirmDeleteDialog(
+            message = "Удалить всё из «$label»? Действие необратимо.",
+            onDismiss = { clearConfirmScope = null },
+            onConfirm = {
+                clearConfirmScope = null
+                scope.launch {
+                    clearStatus = "Очистка…"
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching { ApiFactory.clearData(serverUrl, accessClientId, accessClientSecret, targetScope) }
+                    }
+                    result.fold(
+                        onSuccess = { r ->
+                            clearStatus = "Удалено: событий ${r.deleted_events}, " +
+                                "записей плана ${r.deleted_plan_entries}, изменений плана ${r.deleted_plan_changes}"
+                        },
+                        onFailure = { clearStatus = "Не удалось очистить" },
+                    )
+                }
+            },
+        )
+    }
 }
+
+private val CLEAR_SCOPES = listOf(
+    "static" to "Static",
+    "dynamic" to "Dynamic",
+    "timeline" to "Timeline",
+    "instant" to "Instant",
+    "static_and_dynamic" to "Static и Dynamic",
+    "all" to "всё",
+)

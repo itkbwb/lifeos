@@ -499,3 +499,38 @@ def import_csv(payload: schemas.ImportRequest, db: Session = Depends(get_db)):
 
     db.commit()
     return schemas.ImportResult(created=created, projects_created=projects_created, errors=errors)
+
+
+@app.post("/api/admin/clear", response_model=schemas.ClearResult)
+def clear_data(payload: schemas.ClearRequest, db: Session = Depends(get_db)):
+    scope = payload.scope
+    deleted_events = 0
+    deleted_plan_entries = 0
+    deleted_plan_changes = 0
+
+    if scope in ("timeline", "all"):
+        deleted_events += (
+            db.query(models.Event)
+            .filter(models.Event.type.in_(["start", "end"]))
+            .delete(synchronize_session=False)
+        )
+    if scope in ("instant", "all"):
+        deleted_events += (
+            db.query(models.Event)
+            .filter(models.Event.type == "instant")
+            .delete(synchronize_session=False)
+        )
+    if scope == "dynamic":
+        deleted_plan_changes += db.query(models.PlanChange).delete(synchronize_session=False)
+    if scope in ("static", "static_and_dynamic", "all"):
+        # PlanEntry deletion cascades to its PlanChanges at the DB level (see
+        # database.py's foreign_keys=ON pragma) - count them first to report.
+        deleted_plan_changes += db.query(models.PlanChange).count()
+        deleted_plan_entries += db.query(models.PlanEntry).delete(synchronize_session=False)
+
+    db.commit()
+    return schemas.ClearResult(
+        deleted_events=deleted_events,
+        deleted_plan_entries=deleted_plan_entries,
+        deleted_plan_changes=deleted_plan_changes,
+    )

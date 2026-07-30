@@ -477,3 +477,117 @@ def test_import_csv_tz_offset_applied(client):
     assert resp.status_code == 200
     static = client.get("/api/plan/entries").json()
     assert static[0]["start_time"] == "2026-08-01T06:00:00Z"
+
+
+def _seed_everything(client):
+    project = _make_project(client)
+    client.post(
+        "/api/events",
+        json={"project_id": project["id"], "type": "start", "occurred_at": "2026-08-01T09:00:00Z"},
+    )
+    client.post(
+        "/api/events",
+        json={"project_id": project["id"], "type": "end", "occurred_at": "2026-08-01T10:00:00Z"},
+    )
+    client.post(
+        "/api/events",
+        json={"project_id": project["id"], "type": "instant", "occurred_at": "2026-08-01T11:00:00Z"},
+    )
+    entry = client.post(
+        "/api/plan/entries",
+        json={
+            "project_id": project["id"],
+            "start_time": "2026-08-01T13:00:00Z",
+            "end_time": "2026-08-01T14:00:00Z",
+        },
+    ).json()
+    client.post(
+        f"/api/plan/entries/{entry['id']}/changes",
+        json={
+            "change_type": "move",
+            "new_start_time": "2026-08-01T15:00:00Z",
+            "new_end_time": "2026-08-01T16:00:00Z",
+        },
+    )
+    return project
+
+
+def test_clear_static_cascades_to_plan_changes_but_keeps_events(client):
+    _seed_everything(client)
+    resp = client.post("/api/admin/clear", json={"scope": "static"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deleted_plan_entries"] == 1
+    assert body["deleted_plan_changes"] == 1
+    assert body["deleted_events"] == 0
+
+    assert client.get("/api/plan/entries").json() == []
+    assert client.get("/api/plan/dynamic").json() == []
+    assert len(client.get("/api/events").json()) == 3
+
+
+def test_clear_dynamic_keeps_static(client):
+    _seed_everything(client)
+    resp = client.post("/api/admin/clear", json={"scope": "dynamic"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deleted_plan_changes"] == 1
+    assert body["deleted_plan_entries"] == 0
+
+    static = client.get("/api/plan/entries").json()
+    assert len(static) == 1
+    dynamic = client.get("/api/plan/dynamic").json()
+    assert dynamic[0]["start_time"] == static[0]["start_time"]
+
+
+def test_clear_timeline_keeps_instant_and_plan(client):
+    _seed_everything(client)
+    resp = client.post("/api/admin/clear", json={"scope": "timeline"})
+    assert resp.status_code == 200
+    assert resp.json()["deleted_events"] == 2
+
+    remaining = client.get("/api/events").json()
+    assert len(remaining) == 1
+    assert remaining[0]["type"] == "instant"
+    assert len(client.get("/api/plan/entries").json()) == 1
+
+
+def test_clear_instant_keeps_timeline_and_plan(client):
+    _seed_everything(client)
+    resp = client.post("/api/admin/clear", json={"scope": "instant"})
+    assert resp.status_code == 200
+    assert resp.json()["deleted_events"] == 1
+
+    remaining = client.get("/api/events").json()
+    assert len(remaining) == 2
+    assert {e["type"] for e in remaining} == {"start", "end"}
+
+
+def test_clear_static_and_dynamic_keeps_timeline_and_instant(client):
+    _seed_everything(client)
+    resp = client.post("/api/admin/clear", json={"scope": "static_and_dynamic"})
+    assert resp.status_code == 200
+    assert client.get("/api/plan/entries").json() == []
+    assert len(client.get("/api/events").json()) == 3
+
+
+def test_clear_all_wipes_everything_but_keeps_projects(client):
+    project = _seed_everything(client)
+    resp = client.post("/api/admin/clear", json={"scope": "all"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deleted_events"] == 3
+    assert body["deleted_plan_entries"] == 1
+    assert body["deleted_plan_changes"] == 1
+
+    assert client.get("/api/events").json() == []
+    assert client.get("/api/plan/entries").json() == []
+    assert client.get("/api/plan/dynamic").json() == []
+    projects = client.get("/api/projects").json()
+    assert len(projects) == 1
+    assert projects[0]["id"] == project["id"]
+
+
+def test_clear_invalid_scope_422(client):
+    resp = client.post("/api/admin/clear", json={"scope": "bogus"})
+    assert resp.status_code == 422
