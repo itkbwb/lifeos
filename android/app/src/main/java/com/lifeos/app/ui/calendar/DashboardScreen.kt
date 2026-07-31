@@ -286,10 +286,14 @@ fun DashboardScreen(
         ) {
             // Balances the block vertically between the top bar and the bottom nav: shift
             // = (gap below the date to the nav bar)/2 - (gap above Day D to the top bar)/2,
-            // measured directly from a device screenshot (42px top gap, 396px bottom gap at
-            // 2.625 density -> 67.4dp) rather than guessed, since the two gaps aren't
-            // naturally equal (this content doesn't fill the screen).
-            Spacer(Modifier.height(67.4.dp))
+            // measured directly from a device screenshot rather than guessed, since the two
+            // gaps aren't naturally equal (this content doesn't fill the screen). Recomputed
+            // after the internal Day D/gauge spacing passes below grew the block's total
+            // height and ate into the bottom gap (219px top vs 76px bottom) - re-solving
+            // keeps both at their shared midpoint (~147.5px) instead of the original 219px,
+            // since there isn't enough vertical room to hold every internal gap AND both
+            // outer gaps at 219px simultaneously.
+            Spacer(Modifier.height(40.16.dp))
 
             Text(
                 text = dayDLabel,
