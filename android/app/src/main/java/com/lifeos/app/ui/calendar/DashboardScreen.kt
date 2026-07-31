@@ -325,11 +325,21 @@ fun DashboardScreen(
                     val centerXPx = widthPx / 2f
                     val centerYPx = arcHeightPx
 
-                    fun buttonOffset(angleDeg: Double): IntOffset {
+                    // Centering a button ON the concentric circle (the general case, used for
+                    // Play/Instant) puts the arc-facing point at its middle, so at the arc's
+                    // own end-cap angle (180/360 - Stop/Edit) the button's bottom edge would
+                    // stick out half the button size past the arc's ends. alignBottomToArc
+                    // pins the button's bottom edge to the arc's own end level instead, still
+                    // using the same radial x so it's still outside the arc by the same margin.
+                    fun buttonOffset(angleDeg: Double, alignBottomToArc: Boolean = false): IntOffset {
                         val angleRad = Math.toRadians(angleDeg)
                         val rawX = centerXPx + buttonRadiusPx * cos(angleRad).toFloat() - buttonSizePx / 2f
-                        val y = centerYPx + buttonRadiusPx * sin(angleRad).toFloat() - buttonSizePx / 2f
                         val x = rawX.coerceIn(0f, widthPx - buttonSizePx)
+                        val y = if (alignBottomToArc) {
+                            arcHeightPx - buttonSizePx
+                        } else {
+                            centerYPx + buttonRadiusPx * sin(angleRad).toFloat() - buttonSizePx / 2f
+                        }
                         return IntOffset(x.roundToInt(), y.roundToInt())
                     }
 
@@ -365,7 +375,7 @@ fun DashboardScreen(
                     }
                     IconButton(
                         onClick = { stopProject(timerTarget.entry.project_id) },
-                        modifier = Modifier.offset { buttonOffset(180.0) }.size(buttonSize),
+                        modifier = Modifier.offset { buttonOffset(180.0, alignBottomToArc = true) }.size(buttonSize),
                     ) {
                         Icon(Icons.Filled.Stop, contentDescription = "Закончить", modifier = Modifier.size(48.dp))
                     }
@@ -388,7 +398,7 @@ fun DashboardScreen(
                             editDynamicError = ""
                             showEditDynamicDialog = true
                         },
-                        modifier = Modifier.offset { buttonOffset(0.0) }.size(buttonSize),
+                        modifier = Modifier.offset { buttonOffset(0.0, alignBottomToArc = true) }.size(buttonSize),
                     ) {
                         Icon(Icons.Filled.Edit, contentDescription = "Редактировать", modifier = Modifier.size(44.dp))
                     }
