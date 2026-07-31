@@ -329,14 +329,16 @@ fun DashboardScreen(
                     // Play/Instant) puts the arc-facing point at its middle, so at the arc's
                     // own end-cap angle (180/360 - Stop/Edit) the button's bottom edge would
                     // stick out half the button size past the arc's ends. alignBottomToArc
-                    // pins the button's bottom edge to the arc's own end level instead, still
-                    // using the same radial x so it's still outside the arc by the same margin.
-                    fun buttonOffset(angleDeg: Double, alignBottomToArc: Boolean = false): IntOffset {
+                    // pins the button's VISIBLE ICON's bottom edge (not the invisible 80dp
+                    // touch-target box, which is bigger than the icon and centers it with
+                    // padding) to the arc's own end level, still using the same radial x so
+                    // it's still outside the arc by the same margin.
+                    fun buttonOffset(angleDeg: Double, alignBottomToArc: Boolean = false, iconSizePx: Float = 0f): IntOffset {
                         val angleRad = Math.toRadians(angleDeg)
                         val rawX = centerXPx + buttonRadiusPx * cos(angleRad).toFloat() - buttonSizePx / 2f
                         val x = rawX.coerceIn(0f, widthPx - buttonSizePx)
                         val y = if (alignBottomToArc) {
-                            arcHeightPx - buttonSizePx
+                            arcHeightPx - (buttonSizePx + iconSizePx) / 2f
                         } else {
                             centerYPx + buttonRadiusPx * sin(angleRad).toFloat() - buttonSizePx / 2f
                         }
@@ -375,7 +377,9 @@ fun DashboardScreen(
                     }
                     IconButton(
                         onClick = { stopProject(timerTarget.entry.project_id) },
-                        modifier = Modifier.offset { buttonOffset(180.0, alignBottomToArc = true) }.size(buttonSize),
+                        modifier = Modifier.offset {
+                            buttonOffset(180.0, alignBottomToArc = true, iconSizePx = with(density) { 48.dp.toPx() })
+                        }.size(buttonSize),
                     ) {
                         Icon(Icons.Filled.Stop, contentDescription = "Закончить", modifier = Modifier.size(48.dp))
                     }
@@ -398,7 +402,9 @@ fun DashboardScreen(
                             editDynamicError = ""
                             showEditDynamicDialog = true
                         },
-                        modifier = Modifier.offset { buttonOffset(0.0, alignBottomToArc = true) }.size(buttonSize),
+                        modifier = Modifier.offset {
+                            buttonOffset(0.0, alignBottomToArc = true, iconSizePx = with(density) { 44.dp.toPx() })
+                        }.size(buttonSize),
                     ) {
                         Icon(Icons.Filled.Edit, contentDescription = "Редактировать", modifier = Modifier.size(44.dp))
                     }
