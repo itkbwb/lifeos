@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +23,7 @@ class SettingsStore(private val context: Context) {
     private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
     private val lastStartNotifiedIdKey = intPreferencesKey("last_start_notified_plan_entry_id")
     private val lastStopNotifiedIdKey = intPreferencesKey("last_stop_notified_event_id")
+    private val dayDAnchorDateKey = stringPreferencesKey("day_d_anchor_date")
 
     // Legacy plaintext keys - only ever read once, to be wiped, never trusted again.
     private val legacyAccessClientIdKey = stringPreferencesKey("cf_access_client_id")
@@ -80,6 +82,19 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setLastStopNotifiedEventId(id: Int) {
         context.dataStore.edit { prefs -> prefs[lastStopNotifiedIdKey] = id }
+    }
+
+    /** The "Day D" anchor date shown on the Dashboard as "День Д" (on the anchor
+     * itself) or "День Д+N"/"День Д-N" (days after/before it) - local-only,
+     * device-specific, unrelated to any project/plan data on the server. */
+    val dayDAnchorDate: Flow<LocalDate?> = context.dataStore.data.map { prefs ->
+        prefs[dayDAnchorDateKey]?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    }
+
+    suspend fun setDayDAnchorDate(date: LocalDate?) {
+        context.dataStore.edit { prefs ->
+            if (date == null) prefs.remove(dayDAnchorDateKey) else prefs[dayDAnchorDateKey] = date.toString()
+        }
     }
 
     fun setAccessCredentials(clientId: String, clientSecret: String) {

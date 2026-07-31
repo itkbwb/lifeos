@@ -153,6 +153,7 @@ fun DayTimelineView(
 
     Box(modifier = modifier.fillMaxSize()) {
         DayTimelineContent(
+            date = date,
             renderItems = renderItems,
             projects = projects,
             eventsById = eventsById,
@@ -213,6 +214,7 @@ fun DayTimelineView(
  */
 @Composable
 internal fun DayTimelineContent(
+    date: LocalDate,
     renderItems: List<DayRenderItem>,
     projects: List<Project>,
     eventsById: Map<Int, Event>,
@@ -402,6 +404,17 @@ internal fun DayTimelineContent(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+
+        if (isToday(date)) {
+            val nowTop = yOffsetFor(LocalTime.now())
+            Box(
+                modifier = Modifier
+                    .offset(y = nowTop)
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(MaterialTheme.colorScheme.error),
+            )
         }
     }
 }

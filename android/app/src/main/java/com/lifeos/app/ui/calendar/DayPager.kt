@@ -5,10 +5,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
@@ -48,8 +51,29 @@ fun DayPager(
         if (targetPage != pagerState.currentPage) pagerState.scrollToPage(targetPage)
     }
 
-    HorizontalPager(state = pagerState, modifier = modifier.fillMaxSize()) { page ->
-        val date = baseDate.plusDays((page - DAY_PAGE_CENTER).toLong())
-        content(date)
+    // A real finger's "vertical" drag is never perfectly straight - a diagonal
+    // component during the first few pixels can make the Pager's own
+    // horizontal-orientation touch-slop check win the ambiguous gesture before
+    // the page content's verticalScroll gets a chance, "eating" slow vertical
+    // drags (only a hard flick has enough single-axis velocity to reliably
+    // tip the race the other way). Raising ONLY the Pager's touch slop makes
+    // it require a much more clearly-horizontal gesture before it claims a
+    // drag as a page-swipe, without touching the inner verticalScroll's own
+    // (normal) slop - restored via a second CompositionLocalProvider around
+    // the actual page content, which sits inside this one.
+    val originalViewConfiguration = LocalViewConfiguration.current
+    val pagerViewConfiguration = remember(originalViewConfiguration) {
+        object : ViewConfiguration by originalViewConfiguration {
+            override val touchSlop: Float = originalViewConfiguration.touchSlop * 3f
+        }
+    }
+
+    CompositionLocalProvider(LocalViewConfiguration provides pagerViewConfiguration) {
+        HorizontalPager(state = pagerState, modifier = modifier.fillMaxSize()) { page ->
+            CompositionLocalProvider(LocalViewConfiguration provides originalViewConfiguration) {
+                val date = baseDate.plusDays((page - DAY_PAGE_CENTER).toLong())
+                content(date)
+            }
+        }
     }
 }
