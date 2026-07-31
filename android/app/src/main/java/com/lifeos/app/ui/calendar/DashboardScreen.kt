@@ -4,12 +4,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -42,10 +44,12 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.lifeos.app.R
 import com.lifeos.app.data.ActiveProject
@@ -70,6 +74,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -205,10 +210,10 @@ fun DashboardScreen(
 
     val dayDLabel = dayDAnchor?.let { anchor ->
         when (val offset = ChronoUnit.DAYS.between(anchor, today)) {
-            0L -> "День Д"
-            else -> if (offset > 0) "Д+$offset" else "Д$offset"
+            0L -> "День D"
+            else -> if (offset > 0) "D+$offset" else "D$offset"
         }
-    } ?: "Задать День Д"
+    } ?: "Задать День D"
 
     val timerTarget = remember(dynamicEntries, nowTick) { currentOrNextDynamicEntry(dynamicEntries, nowTick) }
     val timerProjectName = timerTarget?.let { target ->
@@ -281,10 +286,9 @@ fun DashboardScreen(
         ) {
             Text(
                 text = dayDLabel,
-                style = MaterialTheme.typography.headlineMedium.copy(
+                style = MaterialTheme.typography.displaySmall.copy(
                     fontFamily = FontFamily.SansSerif,
                     fontWeight = FontWeight.Black,
-                    fontSize = MaterialTheme.typography.headlineMedium.fontSize * 2f,
                 ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -297,77 +301,96 @@ fun DashboardScreen(
             )
 
             if (timerTarget != null) {
-                // Both button columns are top-aligned with the arc (not centered against
-                // the taller center column, which also holds the countdown/name text below
-                // the arc) so Play/Instant sit right at the arc's peak and the arc's own
-                // height is set to match the two stacked buttons' combined height, so its
-                // base lines up with Stop/Edit's bottom edge.
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.Top,
+                val arcHeight = 117.dp
+                val buttonSize = 80.dp
+                // The 4 buttons sit on a circle concentric with the arc (same center,
+                // radius = arc's own radius + a fixed margin) so every button is the same
+                // perpendicular distance from the arc's curve - Play/Instant near the peak
+                // side (220/320 degrees), Stop/Edit right at the arc's own end-cap angle
+                // (180/360 degrees), matching the arc's angle convention (180=left,
+                // 270=top/peak, 360=right) already used by DayGauge's needle/markers below.
+                // x is clamped to stay on-screen: at 180/360 degrees the raw polar offset
+                // can exceed the box width once the arc itself is already wide enough to
+                // nearly touch both edges.
+                BoxWithConstraints(
+                    modifier = Modifier.fillMaxWidth().height(165.dp).padding(horizontal = 4.dp),
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // Start/stop are never disabled - they just log a timeline
-                        // start/end event regardless of any current state; conflicts (if
-                        // any) are resolved or ignored by hand later, not gated up front.
-                        IconButton(
-                            onClick = { actionState = DashboardActionState.StartPrompt },
-                            modifier = Modifier.size(80.dp),
-                        ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = "Начать", modifier = Modifier.size(48.dp))
-                        }
-                        IconButton(
-                            onClick = { stopProject(timerTarget.entry.project_id) },
-                            modifier = Modifier.size(80.dp),
-                        ) {
-                            Icon(Icons.Filled.Stop, contentDescription = "Закончить", modifier = Modifier.size(48.dp))
-                        }
+                    val density = LocalDensity.current
+                    val widthPx = with(density) { maxWidth.toPx() }
+                    val arcHeightPx = with(density) { arcHeight.toPx() }
+                    val strokeWidthPx = with(density) { 22.5.dp.toPx() }
+                    val radiusPx = (minOf(widthPx, arcHeightPx * 2f) - strokeWidthPx) / 2f
+                    val buttonRadiusPx = radiusPx + with(density) { 40.dp.toPx() }
+                    val buttonSizePx = with(density) { buttonSize.toPx() }
+                    val centerXPx = widthPx / 2f
+                    val centerYPx = arcHeightPx
+
+                    fun buttonOffset(angleDeg: Double): IntOffset {
+                        val angleRad = Math.toRadians(angleDeg)
+                        val rawX = centerXPx + buttonRadiusPx * cos(angleRad).toFloat() - buttonSizePx / 2f
+                        val y = centerYPx + buttonRadiusPx * sin(angleRad).toFloat() - buttonSizePx / 2f
+                        val x = rawX.coerceIn(0f, widthPx - buttonSizePx)
+                        return IntOffset(x.roundToInt(), y.roundToInt())
                     }
 
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        DynamicProgressArc(
-                            progress = timerProgress,
-                            color = timerProjectColor,
-                            modifier = Modifier.fillMaxWidth().height(160.dp).padding(horizontal = 4.dp),
-                        )
+                    DynamicProgressArc(
+                        progress = timerProgress,
+                        color = timerProjectColor,
+                        modifier = Modifier.fillMaxWidth().height(arcHeight),
+                    )
+
+                    // The timer's own bottom edge lands exactly on the arc's ends; the
+                    // project name is a separate line below it, outside the arc.
+                    Box(modifier = Modifier.fillMaxWidth().height(arcHeight), contentAlignment = Alignment.BottomCenter) {
                         Text(
                             text = formatCountdown(nowTick, timerTarget.targetInstant),
                             style = MaterialTheme.typography.displaySmall,
                         )
-                        Text(
-                            text = timerProjectName ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    }
+                    Text(
+                        text = timerProjectName ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.TopCenter).offset(y = arcHeight + 4.dp),
+                    )
+
+                    // Start/stop are never disabled - they just log a timeline start/end
+                    // event regardless of any current state; conflicts (if any) are
+                    // resolved or ignored by hand later, not gated up front.
+                    IconButton(
+                        onClick = { actionState = DashboardActionState.StartPrompt },
+                        modifier = Modifier.offset { buttonOffset(220.0) }.size(buttonSize),
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = "Начать", modifier = Modifier.size(48.dp))
+                    }
+                    IconButton(
+                        onClick = { stopProject(timerTarget.entry.project_id) },
+                        modifier = Modifier.offset { buttonOffset(180.0) }.size(buttonSize),
+                    ) {
+                        Icon(Icons.Filled.Stop, contentDescription = "Закончить", modifier = Modifier.size(48.dp))
+                    }
+                    IconButton(
+                        onClick = {
+                            instantPressTime = LocalTime.now()
+                            instantError = ""
+                            showInstantDialog = true
+                        },
+                        modifier = Modifier.offset { buttonOffset(320.0) }.size(buttonSize),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_instant_sparkle),
+                            contentDescription = "Инстант",
+                            modifier = Modifier.size(44.dp),
                         )
                     }
-
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        IconButton(
-                            onClick = {
-                                instantPressTime = LocalTime.now()
-                                instantError = ""
-                                showInstantDialog = true
-                            },
-                            modifier = Modifier.size(80.dp),
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_instant_sparkle),
-                                contentDescription = "Инстант",
-                                modifier = Modifier.size(44.dp),
-                            )
-                        }
-                        IconButton(
-                            onClick = {
-                                editDynamicError = ""
-                                showEditDynamicDialog = true
-                            },
-                            modifier = Modifier.size(80.dp),
-                        ) {
-                            Icon(Icons.Filled.Edit, contentDescription = "Редактировать", modifier = Modifier.size(44.dp))
-                        }
+                    IconButton(
+                        onClick = {
+                            editDynamicError = ""
+                            showEditDynamicDialog = true
+                        },
+                        modifier = Modifier.offset { buttonOffset(0.0) }.size(buttonSize),
+                    ) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Редактировать", modifier = Modifier.size(44.dp))
                     }
                 }
 
@@ -381,7 +404,10 @@ fun DashboardScreen(
                 }
             }
 
-            Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
                 DayGauge(
                     renderItems = renderItems,
                     projects = projects,
@@ -392,9 +418,7 @@ fun DashboardScreen(
             Text(
                 text = today.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale("ru")))
                     .replaceFirstChar { it.titlecase(java.util.Locale("ru")) },
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontSize = MaterialTheme.typography.titleMedium.fontSize * 2.5f,
-                ),
+                style = MaterialTheme.typography.displaySmall,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -629,7 +653,7 @@ private fun DynamicProgressArc(
     modifier: Modifier = Modifier,
 ) {
     Canvas(modifier = modifier) {
-        val strokeWidthPx = 15.dp.toPx()
+        val strokeWidthPx = 22.5.dp.toPx()
         val radius = (minOf(size.width, size.height * 2f) - strokeWidthPx) / 2f
         val center = Offset(size.width / 2f, size.height)
         val topLeft = Offset(center.x - radius, center.y - radius)
@@ -642,7 +666,7 @@ private fun DynamicProgressArc(
             useCenter = false,
             topLeft = topLeft,
             size = arcSize,
-            style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round),
+            style = Stroke(width = strokeWidthPx, cap = StrokeCap.Butt),
         )
         if (progress > 0f) {
             drawArc(
@@ -652,7 +676,7 @@ private fun DynamicProgressArc(
                 useCenter = false,
                 topLeft = topLeft,
                 size = arcSize,
-                style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round),
+                style = Stroke(width = strokeWidthPx, cap = StrokeCap.Butt),
             )
         }
     }
