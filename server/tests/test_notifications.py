@@ -31,5 +31,5 @@ def test_unregister_missing_token_is_a_noop(client):
 def test_send_push_noop_without_firebase_configured():
     # No FCM_SERVICE_ACCOUNT_FILE is set in the test environment - this must
     # never raise, and must report 0 sends rather than pretending to succeed.
-    sent = notifications.send_push(title="t", body="b", data={"type": "start"})
+    sent = notifications.send_push(data={"type": "start"})
     assert sent == 0

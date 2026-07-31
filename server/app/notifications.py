@@ -38,10 +38,18 @@ def ensure_firebase():
     return _firebase_app
 
 
-def send_push(title: str, body: str, data: dict) -> int:
+def send_push(data: dict) -> int:
     """Sends to every registered device token, pruning any token Firebase
     reports as invalid/unregistered. Returns how many sends succeeded (0 if
-    FCM isn't configured, or there are no registered devices)."""
+    FCM isn't configured, or there are no registered devices).
+
+    Deliberately data-only (no `notification` field): a combined
+    notification+data message is auto-displayed by the OS using a generic
+    fallback channel WITHOUT invoking the app's onMessageReceived() whenever
+    the app isn't in the foreground - which is the main case this exists
+    for. A data-only message always reaches
+    LifeOsFirebaseMessagingService.onMessageReceived(), which builds the
+    real notification (proper channel, action buttons) itself from `data`."""
     app = ensure_firebase()
     if app is None:
         return 0
@@ -54,7 +62,6 @@ def send_push(title: str, body: str, data: dict) -> int:
         sent = 0
         for token in tokens:
             message = messaging.Message(
-                notification=messaging.Notification(title=title, body=body),
                 data={str(k): str(v) for k, v in data.items()},
                 token=token,
             )

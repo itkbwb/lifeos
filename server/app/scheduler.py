@@ -68,8 +68,6 @@ def check_and_notify() -> None:
                 project_name = projects_by_id.get(start_candidate.project_id)
                 project_name = project_name.name if project_name else "проект"
                 sent = notifications.send_push(
-                    title=f"Начать «{project_name}»?",
-                    body="Скоро время по плану",
                     data={
                         "type": "start",
                         "project_id": start_candidate.project_id,
@@ -87,8 +85,6 @@ def check_and_notify() -> None:
                     project_name = projects_by_id.get(active.project_id)
                     project_name = project_name.name if project_name else "проект"
                     sent = notifications.send_push(
-                        title=f"Закончить «{project_name}»?",
-                        body="Запланированное время истекло",
                         data={
                             "type": "end",
                             "project_id": active.project_id,
