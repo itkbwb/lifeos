@@ -284,6 +284,13 @@ fun DashboardScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top,
         ) {
+            // Balances the block vertically between the top bar and the bottom nav: shift
+            // = (gap below the date to the nav bar)/2 - (gap above Day D to the top bar)/2,
+            // measured directly from a device screenshot (42px top gap, 396px bottom gap at
+            // 2.625 density -> 67.4dp) rather than guessed, since the two gaps aren't
+            // naturally equal (this content doesn't fill the screen).
+            Spacer(Modifier.height(67.4.dp))
+
             Text(
                 text = dayDLabel,
                 style = MaterialTheme.typography.displaySmall.copy(
@@ -299,6 +306,11 @@ fun DashboardScreen(
                         showDayDDialog = true
                     },
             )
+
+            // Gap between Day D and the arc's peak tuned to match the gap between the Stop
+            // button and the arc's nearest edge (88px measured on a real screenshot) - was
+            // 59px with no extra spacer, so +11dp closes the 29px difference.
+            Spacer(Modifier.height(11.dp))
 
             if (timerTarget != null) {
                 val arcHeight = 117.dp
@@ -344,9 +356,10 @@ fun DashboardScreen(
                         iconSizePx: Float = 0f,
                         extraOffsetPx: Float = 0f,
                         extraRadiusPx: Float = 0f,
+                        extraDxPx: Float = 0f,
                     ): IntOffset {
                         val angleRad = Math.toRadians(angleDeg)
-                        val rawX = centerXPx + (buttonRadiusPx + extraRadiusPx) * cos(angleRad).toFloat() - buttonSizePx / 2f
+                        val rawX = centerXPx + (buttonRadiusPx + extraRadiusPx) * cos(angleRad).toFloat() - buttonSizePx / 2f + extraDxPx
                         val x = rawX.coerceIn(0f, widthPx - buttonSizePx)
                         val y = if (alignBottomToArc) {
                             arcHeightPx - (buttonSizePx + iconSizePx) / 2f + extraOffsetPx
@@ -382,7 +395,9 @@ fun DashboardScreen(
                     // resolved or ignored by hand later, not gated up front.
                     IconButton(
                         onClick = { actionState = DashboardActionState.StartPrompt },
-                        modifier = Modifier.offset { buttonOffset(220.0) }.size(buttonSize),
+                        modifier = Modifier.offset {
+                            buttonOffset(220.0, extraDxPx = -with(density) { 16.dp.toPx() })
+                        }.size(buttonSize),
                     ) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = "Начать", modifier = Modifier.size(48.dp))
                     }
@@ -406,7 +421,9 @@ fun DashboardScreen(
                             instantError = ""
                             showInstantDialog = true
                         },
-                        modifier = Modifier.offset { buttonOffset(320.0) }.size(buttonSize),
+                        modifier = Modifier.offset {
+                            buttonOffset(320.0, extraDxPx = with(density) { 16.dp.toPx() })
+                        }.size(buttonSize),
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_instant_sparkle),
@@ -444,7 +461,11 @@ fun DashboardScreen(
             }
 
             Box(
-                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp),
+                // top padding tuned so the gap between the project-name text and the gauge's
+                // own Static ring matches the gap between Day D and the top bar above it
+                // (target 219px) - measured via a clean single-screenshot pixel scan (text
+                // bottom, ring top at the gauge's true 12-o'clock point), not eyeballed.
+                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 51.5.dp, bottom = 24.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 DayGauge(
