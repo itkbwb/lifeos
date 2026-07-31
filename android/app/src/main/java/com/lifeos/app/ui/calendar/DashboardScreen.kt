@@ -343,9 +343,10 @@ fun DashboardScreen(
                         alignBottomToArc: Boolean = false,
                         iconSizePx: Float = 0f,
                         extraOffsetPx: Float = 0f,
+                        extraRadiusPx: Float = 0f,
                     ): IntOffset {
                         val angleRad = Math.toRadians(angleDeg)
-                        val rawX = centerXPx + buttonRadiusPx * cos(angleRad).toFloat() - buttonSizePx / 2f
+                        val rawX = centerXPx + (buttonRadiusPx + extraRadiusPx) * cos(angleRad).toFloat() - buttonSizePx / 2f
                         val x = rawX.coerceIn(0f, widthPx - buttonSizePx)
                         val y = if (alignBottomToArc) {
                             arcHeightPx - (buttonSizePx + iconSizePx) / 2f + extraOffsetPx
@@ -393,6 +394,7 @@ fun DashboardScreen(
                                 alignBottomToArc = true,
                                 iconSizePx = with(density) { 48.dp.toPx() },
                                 extraOffsetPx = with(density) { 12.2.dp.toPx() },
+                                extraRadiusPx = with(density) { 16.dp.toPx() },
                             )
                         }.size(buttonSize),
                     ) {
@@ -423,6 +425,7 @@ fun DashboardScreen(
                                 alignBottomToArc = true,
                                 iconSizePx = with(density) { 44.dp.toPx() },
                                 extraOffsetPx = with(density) { 5.7.dp.toPx() },
+                                extraRadiusPx = with(density) { 16.dp.toPx() },
                             )
                         }.size(buttonSize),
                     ) {
