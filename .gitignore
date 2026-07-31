@@ -22,6 +22,12 @@ android/captures/
 *.apk
 *.aab
 
+# Firebase project config (chapter: notifications, server-pushed via FCM) -
+# repo is public, this identifies the Firebase project. Placed locally by
+# whoever sets up the project; CI gets it from a base64 secret instead.
+android/app/google-services.json
+server/firebase-service-account.json
+
 # OS
 .DS_Store
 Thumbs.db

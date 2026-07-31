@@ -261,3 +261,15 @@ class ClearResult(BaseModel):
     deleted_plan_entries: int
     deleted_plan_changes: int
     deleted_projects: int = 0
+
+
+class DeviceTokenRegister(BaseModel):
+    token: str
+
+    @field_validator("token")
+    @classmethod
+    def token_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("token must not be empty")
+        return v

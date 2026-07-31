@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import models, schemas
+from app import scheduler as notification_scheduler
 from app.database import Base, engine, ensure_schema_migrations, get_db
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -20,6 +21,7 @@ app = FastAPI(title="Life OS", version=VERSION)
 
 Base.metadata.create_all(bind=engine)
 ensure_schema_migrations()
+notification_scheduler.start()
 
 
 @app.get("/health")
@@ -558,3 +560,22 @@ def clear_data(payload: schemas.ClearRequest, db: Session = Depends(get_db)):
         deleted_plan_changes=deleted_plan_changes,
         deleted_projects=deleted_projects,
     )
+
+
+@app.post("/api/notifications/register", status_code=204)
+def register_device_token(payload: schemas.DeviceTokenRegister, db: Session = Depends(get_db)):
+    """Registers an FCM token so the server-side scheduler (app/scheduler.py)
+    can push start/stop suggestions to it. Idempotent - re-registering the
+    same token (e.g. on every app launch) is a no-op."""
+    existing = db.query(models.DeviceToken).filter(models.DeviceToken.token == payload.token).first()
+    if existing is None:
+        db.add(models.DeviceToken(token=payload.token))
+        db.commit()
+
+
+@app.post("/api/notifications/unregister", status_code=204)
+def unregister_device_token(payload: schemas.DeviceTokenRegister, db: Session = Depends(get_db)):
+    """Un-registers a token (e.g. the user turned the Settings toggle off) -
+    idempotent, no error if the token was never registered or already gone."""
+    db.query(models.DeviceToken).filter(models.DeviceToken.token == payload.token).delete()
+    db.commit()

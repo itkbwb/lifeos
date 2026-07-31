@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base, UTCDateTime
@@ -99,3 +99,31 @@ class PlanChange(Base):
         nullable=False,
         index=True,
     )
+
+
+class DeviceToken(Base):
+    """An FCM registration token for one installed Android client (chapter:
+    notifications, server-pushed). A personal single-user app, but modeled as
+    a list rather than a singleton so multiple devices work without a schema
+    change later."""
+
+    __tablename__ = "device_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class NotificationState(Base):
+    """Dedup state for the server-side push scheduler - one row per kind
+    (e.g. "last_start_notified_plan_entry_id"), so the same Dynamic Plan
+    entry / active session doesn't trigger a push on every scheduler tick."""
+
+    __tablename__ = "notification_state"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, nullable=False)

@@ -6,6 +6,26 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// CI provides the Firebase config as a base64-encoded secret (same pattern as
+// the release keystore below) since google-services.json can't be committed.
+// Without the secret (e.g. a fork's CI run, or before a Firebase project
+// exists), this is a no-op and the plugin stays unapplied further down.
+val ciGoogleServicesJsonBase64 = System.getenv("GOOGLE_SERVICES_JSON_BASE64")
+val googleServicesJsonFile = file("google-services.json")
+if (ciGoogleServicesJsonBase64 != null && !googleServicesJsonFile.exists()) {
+    googleServicesJsonFile.writeBytes(Base64.getDecoder().decode(ciGoogleServicesJsonBase64))
+}
+
+// The google-services plugin hard-fails the build if applied without a
+// google-services.json present (chapter: notifications, server-pushed via
+// FCM) - applying it conditionally keeps local/dev/CI builds working before
+// a Firebase project has been created, per the user's explicit go-ahead but
+// "not right now" on Pi-side rollout.
+val googleServicesJsonPresent = googleServicesJsonFile.exists()
+if (googleServicesJsonPresent) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 fun computeVersionCode(v: String): Int {
     val parts = v.split(".").map { it.toIntOrNull() ?: 0 }
     val major = parts.getOrElse(0) { 0 }
@@ -41,6 +61,7 @@ android {
 
         buildConfigField("String", "UPDATE_REPO", "\"itkbwb/lifeos\"")
         buildConfigField("String", "UPDATE_CHECK_BASE_URL", "\"https://api.github.com\"")
+        buildConfigField("boolean", "FCM_CONFIGURED", googleServicesJsonPresent.toString())
     }
 
     signingConfigs {
@@ -110,6 +131,15 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Always on the classpath (compiles fine either way) - only the plugin
+    // application above is conditional on google-services.json existing.
+    // Without it, FirebaseApp.initializeApp() has nothing to configure
+    // itself with and fails at runtime; code using it must check
+    // BuildConfig.FCM_CONFIGURED first, same pattern as the notification
+    // permission check.
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
 
     testImplementation("junit:junit:4.13.2")
 }

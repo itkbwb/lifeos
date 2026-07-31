@@ -35,9 +35,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.google.firebase.messaging.FirebaseMessaging
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.SettingsStore
-import com.lifeos.app.notifications.schedulePlanNotifications
+import com.lifeos.app.notifications.LifeOsFirebaseMessagingService
 import com.lifeos.app.ui.ProjectsScreen
 import com.lifeos.app.ui.SettingsScreen
 import com.lifeos.app.ui.calendar.CalendarScreen
@@ -60,7 +61,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleProvisioningIntent(intent)
         ensureNotificationPermission()
-        schedulePlanNotifications(applicationContext)
         setContent {
             LifeOsTheme {
                 LifeOsRoot(updateChecker, ::ensureInstallPermission)
@@ -128,6 +128,25 @@ private fun LifeOsRoot(
 
     LaunchedEffect(Unit) {
         settingsStore.discardLegacyPlaintextCredentials()
+    }
+
+    // Registers (or unregisters, if the Settings toggle is off) this device's
+    // FCM token with the server so its scheduler knows where to push
+    // start/stop suggestions (chapter: notifications, server-pushed). A
+    // no-op build without a Firebase project configured yet - see
+    // BuildConfig.FCM_CONFIGURED / android/app/build.gradle.kts.
+    LaunchedEffect(notificationsEnabled) {
+        if (!BuildConfig.FCM_CONFIGURED) return@LaunchedEffect
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            val token = task.result ?: return@addOnCompleteListener
+            scope.launch {
+                if (notificationsEnabled) {
+                    LifeOsFirebaseMessagingService.registerToken(context, token)
+                } else {
+                    LifeOsFirebaseMessagingService.unregisterToken(context, token)
+                }
+            }
+        }
     }
 
     suspend fun checkForUpdate(): Result<UpdateChecker.UpdateInfo?> =

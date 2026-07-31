@@ -471,6 +471,44 @@ object ApiFactory {
         }
     }
 
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun registerDeviceToken(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        token: String,
+    ) {
+        val json = gson.toJson(mapOf("token" to token))
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/notifications/register")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("registerDeviceToken failed: HTTP ${response.code}")
+            }
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun unregisterDeviceToken(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        token: String,
+    ) {
+        val json = gson.toJson(mapOf("token" to token))
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/notifications/unregister")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("unregisterDeviceToken failed: HTTP ${response.code}")
+            }
+        }
+    }
+
     private fun parseActiveConflict(body: String?): ActiveProjectConflictException? {
         if (body == null) return null
         return runCatching {
