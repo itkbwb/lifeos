@@ -284,16 +284,15 @@ fun DashboardScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top,
         ) {
-            // Balances the block vertically between the top bar and the bottom nav: shift
-            // = (gap below the date to the nav bar)/2 - (gap above Day D to the top bar)/2,
-            // measured directly from a device screenshot rather than guessed, since the two
-            // gaps aren't naturally equal (this content doesn't fill the screen). Recomputed
-            // after the internal Day D/gauge spacing passes below grew the block's total
-            // height and ate into the bottom gap (219px top vs 76px bottom) - re-solving
-            // keeps both at their shared midpoint (~147.5px) instead of the original 219px,
-            // since there isn't enough vertical room to hold every internal gap AND both
-            // outer gaps at 219px simultaneously.
-            Spacer(Modifier.height(40.16.dp))
+            // Balances the block vertically between the top bar and the bottom nav by
+            // splitting whatever space is left over (after all fixed-size content below is
+            // measured) equally between a Spacer here and a matching one after the date text
+            // - a fixed dp value calibrated on one emulator's screen geometry doesn't scale
+            // to other screen sizes (confirmed: on a real device with different dimensions,
+            // the fixed-dp version pushed the date text behind the bottom nav bar entirely).
+            // weight(1f) on both ends makes Compose recompute this per available height,
+            // responsive to any device.
+            Spacer(Modifier.weight(1f))
 
             Text(
                 text = dayDLabel,
@@ -486,6 +485,7 @@ fun DashboardScreen(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.weight(1f))
         }
     }
 
