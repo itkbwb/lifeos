@@ -839,14 +839,20 @@ private fun DayGauge(
             }
         }
 
-        // INSTANT markers: small dots on the Timeline ring.
+        // INSTANT markers: thin radial ticks across the Timeline ring (not bold dots).
         renderItems.filter { it.layerType == RenderLayerType.TIMELINE_INSTANT }.forEach { marker ->
             val angle = Math.toRadians(angleForTime(marker.startTime).toDouble())
-            val dot = Offset(
-                center.x + timelineRadius * cos(angle).toFloat(),
-                center.y + timelineRadius * sin(angle).toFloat(),
+            val cosA = cos(angle).toFloat()
+            val sinA = sin(angle).toFloat()
+            val inner = Offset(
+                center.x + (timelineRadius - ringWidth / 2f) * cosA,
+                center.y + (timelineRadius - ringWidth / 2f) * sinA,
             )
-            drawCircle(color = colorFor(marker.projectId), radius = ringWidth * 0.4f, center = dot)
+            val outer = Offset(
+                center.x + (timelineRadius + ringWidth / 2f) * cosA,
+                center.y + (timelineRadius + ringWidth / 2f) * sinA,
+            )
+            drawLine(color = colorFor(marker.projectId), start = inner, end = outer, strokeWidth = 2.dp.toPx())
         }
 
         // Current-time needle.
