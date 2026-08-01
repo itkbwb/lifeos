@@ -568,14 +568,14 @@ private fun ProjectTile(
             color = onColor,
             modifier = Modifier.weight(1f),
         )
-        IconButton(onClick = onStart, enabled = !isActive) {
+        IconButton(onClick = onStart) {
             Icon(
                 imageVector = Icons.Filled.PlayArrow,
                 contentDescription = "Начать",
                 tint = if (isActive) disabledTint else onColor,
             )
         }
-        IconButton(onClick = onStop, enabled = isActive) {
+        IconButton(onClick = onStop) {
             Icon(
                 imageVector = Icons.Filled.Stop,
                 contentDescription = "Завершить",

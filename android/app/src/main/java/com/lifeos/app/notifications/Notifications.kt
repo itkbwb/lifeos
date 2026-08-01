@@ -11,6 +11,8 @@ import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.lifeos.app.MainActivity
+import com.lifeos.app.R
 
 /**
  * Two separate notification channels/kinds (chapter: notifications) - a
@@ -54,10 +56,11 @@ object Notifications {
         ensureChannels(context)
         if (!hasPostPermission(context)) return false
         val notification = NotificationCompat.Builder(context, CHANNEL_START)
-            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setSmallIcon(R.drawable.ic_instant_sparkle)
             .setContentTitle("Начать «$projectName»?")
             .setContentText("Скоро время по плану")
             .setAutoCancel(true)
+            .setContentIntent(openAppIntent(context, notificationId))
             .addAction(0, "Начать", actionIntent(context, ACTION_START_PROJECT, projectId, notificationId))
             .addAction(0, "Игнорировать", actionIntent(context, ACTION_DISMISS, projectId, notificationId))
             .build()
@@ -69,15 +72,33 @@ object Notifications {
         ensureChannels(context)
         if (!hasPostPermission(context)) return false
         val notification = NotificationCompat.Builder(context, CHANNEL_STOP)
-            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setSmallIcon(R.drawable.ic_instant_sparkle)
             .setContentTitle("Закончить «$projectName»?")
             .setContentText("Запланированное время истекло")
             .setAutoCancel(true)
+            .setContentIntent(openAppIntent(context, notificationId))
             .addAction(0, "Закончить", actionIntent(context, ACTION_END_PROJECT, projectId, notificationId))
             .addAction(0, "Игнорировать", actionIntent(context, ACTION_DISMISS, projectId, notificationId))
             .build()
         NotificationManagerCompat.from(context).notify(notificationId, notification)
         return true
+    }
+
+    /** Tapping the notification body (not one of its action buttons) just opens
+     * the app - there's no deep link to a specific screen, MainActivity's own
+     * default (Dashboard) is enough context for the user to act on the
+     * suggestion themselves. */
+    private fun openAppIntent(context: Context, notificationId: Int): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        // Same request-code scheme as actionIntent (notificationId * 10 + a small
+        // offset) but offset 9 - actionIntent only ever uses 0-2, so this can't
+        // collide with either of a given notification's two action buttons.
+        return PendingIntent.getActivity(
+            context, notificationId * 10 + 9, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun actionIntent(context: Context, action: String, projectId: Int, notificationId: Int): PendingIntent {
