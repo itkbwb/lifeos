@@ -291,8 +291,10 @@ fun DashboardScreen(
             // to other screen sizes (confirmed: on a real device with different dimensions,
             // the fixed-dp version pushed the date text behind the bottom nav bar entirely).
             // weight(1f) on both ends makes Compose recompute this per available height,
-            // responsive to any device.
-            Spacer(Modifier.weight(1f))
+            // responsive to any device. Weight 3 (not 1) because everything below Day D was
+            // pulled 1/3 closer to it - see the next Spacer's comment; the 5 gaps are 3:2:3:3:4
+            // in fifteenths, so this one keeps its original 1/5 share (3/15 = 1/5).
+            Spacer(Modifier.weight(3f))
 
             Text(
                 text = dayDLabel,
@@ -310,11 +312,13 @@ fun DashboardScreen(
                     },
             )
 
-            // All inter-block gaps (top bar<->Day D, Day D<->timer block, timer block<->gauge,
-            // gauge<->date, date<->bottom nav) use the same weight(1f) so they come out equal
-            // - fixed dp gaps tuned by pixel-measuring one emulator screenshot looked right
-            // there but were visibly uneven on a real device with different proportions.
-            Spacer(Modifier.weight(1f))
+            // Everything below Day D (timer block, gauge, date) is pulled 1/3 of this gap's
+            // own size closer to Day D - a rigid shift, so the gaps between those blocks
+            // (timer<->gauge, gauge<->date) stay exactly as they were; only this gap shrinks,
+            // and the freed space lands in the last Spacer below the date, at the bottom.
+            // With 5 originally-equal weight(1f) gaps, "shrink this one by 1/3 of its own
+            // size" means its new weight is 2/3 of the other four's - 3:2:3:3:4 in fifteenths.
+            Spacer(Modifier.weight(2f))
 
             if (timerTarget != null) {
                 val arcHeight = 117.dp
@@ -464,7 +468,7 @@ fun DashboardScreen(
                 }
             }
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.weight(3f))
 
             Box(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
@@ -477,7 +481,7 @@ fun DashboardScreen(
                 )
             }
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.weight(3f))
             Text(
                 text = today.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale("ru")))
                     .replaceFirstChar { it.titlecase(java.util.Locale("ru")) },
@@ -485,7 +489,7 @@ fun DashboardScreen(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.weight(4f))
         }
     }
 
