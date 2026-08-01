@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -106,6 +107,11 @@ fun DayTimelineView(
     accessClientId: String,
     accessClientSecret: String,
     onTapInterval: (Event) -> Unit = {},
+    // Hoisted by the caller (one instance shared across every day DayPager
+    // swipes through) so scrolling partway down a day and swiping to the
+    // next one keeps that same vertical position, instead of each day's page
+    // getting its own ScrollState reset to 0 - see DayPager/CalendarScreen.
+    scrollState: ScrollState = rememberScrollState(),
     modifier: Modifier = Modifier,
 ) {
     var events by remember { mutableStateOf<List<Event>>(emptyList()) }
@@ -158,6 +164,7 @@ fun DayTimelineView(
             projects = projects,
             eventsById = eventsById,
             onTapInterval = onTapInterval,
+            scrollState = scrollState,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -223,9 +230,10 @@ internal fun DayTimelineContent(
     projects: List<Project>,
     eventsById: Map<Int, Event>,
     onTapInterval: (Event) -> Unit = {},
+    scrollState: ScrollState = rememberScrollState(),
     modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(modifier = modifier.verticalScroll(rememberScrollState())) {
+    BoxWithConstraints(modifier = modifier.verticalScroll(scrollState)) {
         val contentWidth = maxWidth - CONTENT_START_DP.dp - CONTENT_END_DP.dp
 
         Column(modifier = Modifier.fillMaxWidth()) {

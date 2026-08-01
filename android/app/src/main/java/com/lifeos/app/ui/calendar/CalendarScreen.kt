@@ -3,6 +3,8 @@ package com.lifeos.app.ui.calendar
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
@@ -41,6 +43,12 @@ fun CalendarScreen(
     var dayListMode by remember { mutableStateOf(false) }
     var showDaySummary by remember { mutableStateOf(false) }
     var projects by remember { mutableStateOf<List<Project>>(emptyList()) }
+    // Hoisted above DayPager (not inside its per-date content lambda) so
+    // swiping from one day to the next keeps the same vertical scroll
+    // position instead of each day starting back at the top - see
+    // DayTimelineView/DayEventListView's scrollState/listState params.
+    val dayTimelineScrollState = rememberScrollState()
+    val dayListState = rememberLazyListState()
 
     LaunchedEffect(serverUrl) {
         withContext(Dispatchers.IO) {
@@ -93,6 +101,7 @@ fun CalendarScreen(
                         serverUrl = serverUrl,
                         accessClientId = accessClientId,
                         accessClientSecret = accessClientSecret,
+                        listState = dayListState,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
@@ -102,6 +111,7 @@ fun CalendarScreen(
                         serverUrl = serverUrl,
                         accessClientId = accessClientId,
                         accessClientSecret = accessClientSecret,
+                        scrollState = dayTimelineScrollState,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
