@@ -101,6 +101,28 @@ class PlanChange(Base):
     )
 
 
+class Subtask(Base):
+    """A checklist item under a Project (chapter: project subtasks) - plain
+    text + done flag + a manual `position` for drag-to-reorder. Deleted along
+    with its project (ON DELETE CASCADE) - unlike Events/PlanEntries these
+    aren't historical records worth preserving once the project is gone."""
+
+    __tablename__ = "subtasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class DeviceToken(Base):
     """An FCM registration token for one installed Android client (chapter:
     notifications, server-pushed). A personal single-user app, but modeled as

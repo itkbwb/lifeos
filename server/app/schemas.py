@@ -263,6 +263,52 @@ class ClearResult(BaseModel):
     deleted_projects: int = 0
 
 
+class SubtaskCreate(BaseModel):
+    project_id: int
+    title: str
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("title must not be empty")
+        return v
+
+
+class SubtaskUpdate(BaseModel):
+    title: Optional[str] = None
+    done: Optional[bool] = None
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("title must not be empty")
+        return v
+
+
+class SubtaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    title: str
+    done: bool
+    position: int
+    created_at: datetime
+
+
+class SubtaskReorder(BaseModel):
+    """The project's subtask ids in their new order - must be exactly the
+    project's current subtask id set (no partial reorders, nothing dropped)."""
+
+    ordered_ids: list[int]
+
+
 class DeviceTokenRegister(BaseModel):
     token: str
 

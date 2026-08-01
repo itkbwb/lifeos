@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
@@ -86,6 +87,7 @@ fun ProjectsScreen(
     var dialogState by remember { mutableStateOf<DialogState>(DialogState.None) }
     var dialogError by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(false) }
+    var openSubtasksFor by remember { mutableStateOf<Project?>(null) }
 
     val scope = rememberCoroutineScope()
 
@@ -164,6 +166,18 @@ fun ProjectsScreen(
 
     LaunchedEffect(refreshToken, serverUrl) { reload() }
 
+    val subtasksTarget = openSubtasksFor
+    if (subtasksTarget != null) {
+        SubtasksScreen(
+            project = subtasksTarget,
+            serverUrl = serverUrl,
+            accessClientId = accessClientId,
+            accessClientSecret = accessClientSecret,
+            onBack = { openSubtasksFor = null },
+        )
+        return
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("Проекты") })
@@ -208,7 +222,8 @@ fun ProjectsScreen(
                         ProjectTile(
                             project = project,
                             isActive = activeProject?.project_id == project.id,
-                            onClick = {
+                            onClick = { openSubtasksFor = project },
+                            onEdit = {
                                 dialogError = ""
                                 dialogState = DialogState.Edit(project)
                             },
@@ -474,6 +489,7 @@ private fun ProjectTile(
     project: Project,
     isActive: Boolean,
     onClick: () -> Unit,
+    onEdit: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onInstant: () -> Unit,
@@ -520,6 +536,13 @@ private fun ProjectTile(
             Icon(
                 painter = painterResource(R.drawable.ic_instant_sparkle),
                 contentDescription = "Отметить",
+                tint = onColor,
+            )
+        }
+        IconButton(onClick = onEdit) {
+            Icon(
+                imageVector = Icons.Filled.Edit,
+                contentDescription = "Редактировать",
                 tint = onColor,
             )
         }

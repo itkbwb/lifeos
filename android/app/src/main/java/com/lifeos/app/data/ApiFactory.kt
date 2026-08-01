@@ -509,6 +509,114 @@ object ApiFactory {
         }
     }
 
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun listSubtasks(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectId: Int,
+    ): List<Subtask> {
+        val requestBuilder = Request.Builder().url(normalize(baseUrl) + "api/projects/$projectId/subtasks")
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("listSubtasks failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("listSubtasks: empty response body")
+            val type = object : TypeToken<List<Subtask>>() {}.type
+            return gson.fromJson(body, type)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun createSubtask(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectId: Int,
+        title: String,
+    ): Subtask {
+        val json = gson.toJson(mapOf("project_id" to projectId, "title" to title))
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/subtasks")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("createSubtask failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("createSubtask: empty response body")
+            return gson.fromJson(body, Subtask::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun updateSubtask(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        id: Int,
+        title: String? = null,
+        done: Boolean? = null,
+    ): Subtask {
+        val fields = mutableMapOf<String, Any>()
+        title?.let { fields["title"] = it }
+        done?.let { fields["done"] = it }
+        val json = gson.toJson(fields)
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/subtasks/$id")
+            .patch(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("updateSubtask failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("updateSubtask: empty response body")
+            return gson.fromJson(body, Subtask::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun deleteSubtask(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        id: Int,
+    ) {
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/subtasks/$id")
+            .delete()
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("deleteSubtask failed: HTTP ${response.code}")
+            }
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun reorderSubtasks(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectId: Int,
+        orderedIds: List<Int>,
+    ): List<Subtask> {
+        val json = gson.toJson(mapOf("ordered_ids" to orderedIds))
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/projects/$projectId/subtasks/reorder")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("reorderSubtasks failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("reorderSubtasks: empty response body")
+            val type = object : TypeToken<List<Subtask>>() {}.type
+            return gson.fromJson(body, type)
+        }
+    }
+
     private fun parseActiveConflict(body: String?): ActiveProjectConflictException? {
         if (body == null) return null
         return runCatching {

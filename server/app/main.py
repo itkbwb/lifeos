@@ -100,6 +100,79 @@ def delete_project(project_id: int, force: bool = False, db: Session = Depends(g
         raise HTTPException(status_code=409, detail="project has events; cannot delete")
 
 
+@app.get("/api/projects/{project_id}/subtasks", response_model=list[schemas.SubtaskOut])
+def list_subtasks(project_id: int, db: Session = Depends(get_db)):
+    if db.get(models.Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return (
+        db.query(models.Subtask)
+        .filter(models.Subtask.project_id == project_id)
+        .order_by(models.Subtask.position.asc())
+        .all()
+    )
+
+
+@app.post("/api/subtasks", response_model=schemas.SubtaskOut, status_code=201)
+def create_subtask(payload: schemas.SubtaskCreate, db: Session = Depends(get_db)):
+    if db.get(models.Project, payload.project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    last = (
+        db.query(models.Subtask)
+        .filter(models.Subtask.project_id == payload.project_id)
+        .order_by(models.Subtask.position.desc())
+        .first()
+    )
+    subtask = models.Subtask(
+        project_id=payload.project_id,
+        title=payload.title,
+        position=(last.position + 1) if last else 0,
+    )
+    db.add(subtask)
+    db.commit()
+    db.refresh(subtask)
+    return subtask
+
+
+@app.patch("/api/subtasks/{subtask_id}", response_model=schemas.SubtaskOut)
+def update_subtask(subtask_id: int, payload: schemas.SubtaskUpdate, db: Session = Depends(get_db)):
+    subtask = db.get(models.Subtask, subtask_id)
+    if subtask is None:
+        raise HTTPException(status_code=404, detail="Subtask not found")
+    if payload.title is not None:
+        subtask.title = payload.title
+    if payload.done is not None:
+        subtask.done = payload.done
+    db.commit()
+    db.refresh(subtask)
+    return subtask
+
+
+@app.delete("/api/subtasks/{subtask_id}", status_code=204)
+def delete_subtask(subtask_id: int, db: Session = Depends(get_db)):
+    subtask = db.get(models.Subtask, subtask_id)
+    if subtask is None:
+        raise HTTPException(status_code=404, detail="Subtask not found")
+    db.delete(subtask)
+    db.commit()
+
+
+@app.post("/api/projects/{project_id}/subtasks/reorder", response_model=list[schemas.SubtaskOut])
+def reorder_subtasks(project_id: int, payload: schemas.SubtaskReorder, db: Session = Depends(get_db)):
+    subtasks = {
+        s.id: s
+        for s in db.query(models.Subtask).filter(models.Subtask.project_id == project_id).all()
+    }
+    if set(payload.ordered_ids) != set(subtasks.keys()):
+        raise HTTPException(
+            status_code=400,
+            detail="ordered_ids must match the project's current subtask ids exactly",
+        )
+    for position, subtask_id in enumerate(payload.ordered_ids):
+        subtasks[subtask_id].position = position
+    db.commit()
+    return sorted(subtasks.values(), key=lambda s: s.position)
+
+
 def _live_end_after(db: Session, project_id: int, after: datetime) -> Optional[models.Event]:
     return (
         db.query(models.Event)
