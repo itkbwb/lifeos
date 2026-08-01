@@ -23,12 +23,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.Project
 import com.lifeos.app.ui.theme.ProjectColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 private fun ColorPicker(selected: String, onSelect: (String) -> Unit) {
@@ -105,6 +110,9 @@ fun ProjectFormDialog(
 fun ProjectEditDialog(
     project: Project,
     errorMessage: String,
+    serverUrl: String,
+    accessClientId: String = "",
+    accessClientSecret: String = "",
     onDismiss: () -> Unit,
     onSave: (name: String, color: String) -> Unit,
     onRequestDelete: () -> Unit,
@@ -112,6 +120,33 @@ fun ProjectEditDialog(
 ) {
     var name by remember(project.id) { mutableStateOf(project.name) }
     var color by remember(project.id) { mutableStateOf(project.color) }
+    // Independent of the name/color "Сохранить" flow - notes save immediately
+    // on their own, without needing this dialog's own confirm button.
+    var notes by remember(project.id) { mutableStateOf(project.notes ?: "") }
+    var showNotesEditor by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    if (showNotesEditor) {
+        NotesEditorDialog(
+            title = "Заметка · ${project.name}",
+            initialNotes = notes,
+            onDismiss = { showNotesEditor = false },
+            onSave = { newNotes ->
+                notes = newNotes
+                showNotesEditor = false
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.updateProject(
+                                serverUrl, accessClientId, accessClientSecret,
+                                id = project.id, notes = newNotes,
+                            )
+                        }
+                    }
+                }
+            },
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -132,6 +167,9 @@ fun ProjectEditDialog(
                 }
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { showNotesEditor = true }) {
+                        Text(if (notes.isBlank()) "Заметка" else "Заметка ✓")
+                    }
                     TextButton(onClick = onToggleArchive) {
                         Text(if (project.archived) "Восстановить" else "Архивировать")
                     }

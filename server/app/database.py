@@ -76,6 +76,9 @@ def ensure_schema_migrations():
         if "archived" not in columns:
             conn.exec_driver_sql("ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
             conn.commit()
+        if "notes" not in columns:
+            conn.exec_driver_sql("ALTER TABLE projects ADD COLUMN notes TEXT")
+            conn.commit()
 
         plan_entry_columns = {
             row[1] for row in conn.exec_driver_sql("PRAGMA table_info(plan_entries)").fetchall()
@@ -83,5 +86,17 @@ def ensure_schema_migrations():
         if "subtask_id" not in plan_entry_columns:
             conn.exec_driver_sql(
                 "ALTER TABLE plan_entries ADD COLUMN subtask_id INTEGER REFERENCES subtasks(id) ON DELETE SET NULL"
+            )
+            conn.commit()
+
+        subtask_columns = {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(subtasks)").fetchall()
+        }
+        if "notes" not in subtask_columns:
+            conn.exec_driver_sql("ALTER TABLE subtasks ADD COLUMN notes TEXT")
+            conn.commit()
+        if "parent_id" not in subtask_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE subtasks ADD COLUMN parent_id INTEGER REFERENCES subtasks(id) ON DELETE CASCADE"
             )
             conn.commit()

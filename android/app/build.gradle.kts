@@ -122,6 +122,13 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
 
+    // Markdown rendering for project/subtask notes (chapter: notes).
+    // Pinned to 0.26.0 (not latest) - 0.27.0+ is built against Compose 1.7.5's
+    // Composer API (startReplaceGroup), which doesn't exist in this project's
+    // Compose BOM 2024.06.00 (Compose 1.6.8) and crashes at runtime with
+    // NoSuchMethodError. 0.26.0 is the last release built against Compose 1.6.8.
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.26.0")
+
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.core:core-ktx:1.13.1")
     // play-services-basement (pulled in transitively by firebase-messaging)

@@ -6,4 +6,5 @@ data class Project(
     val color: String,
     val created_at: String,
     val archived: Boolean = false,
+    val notes: String? = null,
 )

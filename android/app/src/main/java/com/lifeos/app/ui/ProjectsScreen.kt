@@ -367,6 +367,9 @@ fun ProjectsScreen(
         is DialogState.Edit -> ProjectEditDialog(
             project = state.project,
             errorMessage = dialogError,
+            serverUrl = serverUrl,
+            accessClientId = accessClientId,
+            accessClientSecret = accessClientSecret,
             onDismiss = { dialogState = DialogState.None },
             onSave = { name, color ->
                 scope.launch {

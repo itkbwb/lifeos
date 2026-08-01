@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base, UTCDateTime
@@ -24,6 +24,9 @@ class Project(Base):
     # stay resolvable for historical Timeline/Static/Dynamic records that
     # still reference them - never deleted, never hidden from GET /api/projects.
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Freeform Markdown notes (chapter: project/subtask notes) - rendered
+    # client-side, stored as raw text server-side.
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class Event(Base):
@@ -111,7 +114,11 @@ class Subtask(Base):
     """A checklist item under a Project (chapter: project subtasks) - plain
     text + done flag + a manual `position` for drag-to-reorder. Deleted along
     with its project (ON DELETE CASCADE) - unlike Events/PlanEntries these
-    aren't historical records worth preserving once the project is gone."""
+    aren't historical records worth preserving once the project is gone.
+
+    Subtasks can nest to unlimited depth via `parent_id` (chapter: nested
+    subtasks) - CASCADE (not SET NULL) so deleting a parent removes its
+    whole subtree, consistent with subtasks not being historical records."""
 
     __tablename__ = "subtasks"
 
@@ -119,9 +126,13 @@ class Subtask(Base):
     project_id: Mapped[int] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    parent_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("subtasks.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     title: Mapped[str] = mapped_column(String, nullable=False)
     done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime,
         default=lambda: datetime.now(timezone.utc),

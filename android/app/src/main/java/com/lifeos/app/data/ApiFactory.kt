@@ -62,8 +62,11 @@ object ApiFactory {
         accessClientSecret: String = "",
         name: String,
         color: String,
+        notes: String? = null,
     ): Project {
-        val json = gson.toJson(mapOf("name" to name, "color" to color))
+        val fields = mutableMapOf<String, Any>("name" to name, "color" to color)
+        notes?.let { fields["notes"] = it }
+        val json = gson.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/projects")
             .post(json.toRequestBody(jsonMediaType))
@@ -86,11 +89,13 @@ object ApiFactory {
         name: String? = null,
         color: String? = null,
         archived: Boolean? = null,
+        notes: String? = null,
     ): Project {
         val fields = mutableMapOf<String, Any>()
         name?.let { fields["name"] = it }
         color?.let { fields["color"] = it }
         archived?.let { fields["archived"] = it }
+        notes?.let { fields["notes"] = it }
         val json = gson.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/projects/$id")
@@ -583,8 +588,11 @@ object ApiFactory {
         accessClientSecret: String = "",
         projectId: Int,
         title: String,
+        parentId: Int? = null,
     ): Subtask {
-        val json = gson.toJson(mapOf("project_id" to projectId, "title" to title))
+        val fields = mutableMapOf<String, Any>("project_id" to projectId, "title" to title)
+        parentId?.let { fields["parent_id"] = it }
+        val json = gson.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/subtasks")
             .post(json.toRequestBody(jsonMediaType))
@@ -606,11 +614,19 @@ object ApiFactory {
         id: Int,
         title: String? = null,
         done: Boolean? = null,
+        notes: String? = null,
+        parentId: Int? = null,
+        clearParent: Boolean = false,
     ): Subtask {
-        val fields = mutableMapOf<String, Any>()
-        title?.let { fields["title"] = it }
-        done?.let { fields["done"] = it }
-        val json = gson.toJson(fields)
+        // JsonObject (not a plain map) + gsonSerializeNulls - clearParent needs an
+        // explicit "parent_id": null the server can tell apart from "omitted" via
+        // model_fields_set, same reasoning as updatePlanEntry's clearSubtask.
+        val fields = JsonObject()
+        title?.let { fields.addProperty("title", it) }
+        done?.let { fields.addProperty("done", it) }
+        notes?.let { fields.addProperty("notes", it) }
+        if (clearParent) fields.add("parent_id", JsonNull.INSTANCE) else parentId?.let { fields.addProperty("parent_id", it) }
+        val json = gsonSerializeNulls.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/subtasks/$id")
             .patch(json.toRequestBody(jsonMediaType))
@@ -649,8 +665,11 @@ object ApiFactory {
         accessClientSecret: String = "",
         projectId: Int,
         orderedIds: List<Int>,
+        parentId: Int? = null,
     ): List<Subtask> {
-        val json = gson.toJson(mapOf("ordered_ids" to orderedIds))
+        val fields = mutableMapOf<String, Any>("ordered_ids" to orderedIds)
+        parentId?.let { fields["parent_id"] = it }
+        val json = gson.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/projects/$projectId/subtasks/reorder")
             .post(json.toRequestBody(jsonMediaType))

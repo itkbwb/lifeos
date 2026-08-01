@@ -11,6 +11,7 @@ PROJECT_COLORS = {"lavender", "blue", "green", "yellow", "orange", "red", "pink"
 class ProjectCreate(BaseModel):
     name: str
     color: str
+    notes: Optional[str] = None
 
     @field_validator("name")
     @classmethod
@@ -32,6 +33,7 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
     archived: Optional[bool] = None
+    notes: Optional[str] = None
 
     @field_validator("name")
     @classmethod
@@ -61,6 +63,7 @@ class ProjectOut(BaseModel):
     color: str
     created_at: datetime
     archived: bool
+    notes: Optional[str]
 
 
 EVENT_TYPES = {"start", "end", "instant"}
@@ -335,6 +338,7 @@ class ClearResult(BaseModel):
 class SubtaskCreate(BaseModel):
     project_id: int
     title: str
+    parent_id: Optional[int] = None
 
     @field_validator("title")
     @classmethod
@@ -346,8 +350,15 @@ class SubtaskCreate(BaseModel):
 
 
 class SubtaskUpdate(BaseModel):
+    """`parent_id` is the one field here that needs explicit-null ("move to
+    root") support - the endpoint checks `model_fields_set` for it, same
+    pattern as `PlanEntryUpdate.subtask_id`, so a bare-omitted field still
+    means "don't change" while `{"parent_id": null}` outdents to the root."""
+
     title: Optional[str] = None
     done: Optional[bool] = None
+    notes: Optional[str] = None
+    parent_id: Optional[int] = None
 
     @field_validator("title")
     @classmethod
@@ -365,17 +376,22 @@ class SubtaskOut(BaseModel):
 
     id: int
     project_id: int
+    parent_id: Optional[int]
     title: str
     done: bool
     position: int
+    notes: Optional[str]
     created_at: datetime
 
 
 class SubtaskReorder(BaseModel):
-    """The project's subtask ids in their new order - must be exactly the
-    project's current subtask id set (no partial reorders, nothing dropped)."""
+    """The ordered ids of one sibling group - all subtasks sharing the same
+    `parent_id` (None = the project's root-level subtasks) - must be exactly
+    that group's current id set (no partial reorders, nothing dropped, and
+    reordering one group never touches another parent's children)."""
 
     ordered_ids: list[int]
+    parent_id: Optional[int] = None
 
 
 class DeviceTokenRegister(BaseModel):

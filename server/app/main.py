@@ -49,7 +49,7 @@ def list_projects(db: Session = Depends(get_db)):
 
 @app.post("/api/projects", response_model=schemas.ProjectOut, status_code=201)
 def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)):
-    project = models.Project(name=payload.name, color=payload.color)
+    project = models.Project(name=payload.name, color=payload.color, notes=payload.notes)
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -67,6 +67,8 @@ def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session 
         project.color = payload.color
     if payload.archived is not None:
         project.archived = payload.archived
+    if payload.notes is not None:
+        project.notes = payload.notes
     db.commit()
     db.refresh(project)
     return project
@@ -116,14 +118,25 @@ def list_subtasks(project_id: int, db: Session = Depends(get_db)):
 def create_subtask(payload: schemas.SubtaskCreate, db: Session = Depends(get_db)):
     if db.get(models.Project, payload.project_id) is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    if payload.parent_id is not None:
+        parent = db.get(models.Subtask, payload.parent_id)
+        if parent is None or parent.project_id != payload.project_id:
+            raise HTTPException(status_code=422, detail="parent_id must belong to project_id")
+    # position is scoped to this subtask's own sibling group (same project_id
+    # AND same parent_id), not the whole project - each nesting level orders
+    # independently.
     last = (
         db.query(models.Subtask)
-        .filter(models.Subtask.project_id == payload.project_id)
+        .filter(
+            models.Subtask.project_id == payload.project_id,
+            models.Subtask.parent_id == payload.parent_id,
+        )
         .order_by(models.Subtask.position.desc())
         .first()
     )
     subtask = models.Subtask(
         project_id=payload.project_id,
+        parent_id=payload.parent_id,
         title=payload.title,
         position=(last.position + 1) if last else 0,
     )
@@ -142,6 +155,41 @@ def update_subtask(subtask_id: int, payload: schemas.SubtaskUpdate, db: Session 
         subtask.title = payload.title
     if payload.done is not None:
         subtask.done = payload.done
+    if payload.notes is not None:
+        subtask.notes = payload.notes
+    if "parent_id" in payload.model_fields_set:
+        new_parent_id = payload.parent_id
+        if new_parent_id is not None:
+            if new_parent_id == subtask.id:
+                raise HTTPException(status_code=422, detail="a subtask cannot be its own parent")
+            parent = db.get(models.Subtask, new_parent_id)
+            if parent is None or parent.project_id != subtask.project_id:
+                raise HTTPException(status_code=422, detail="parent_id must belong to the same project")
+            # Walk up from the proposed parent to the root, rejecting the move
+            # if `subtask` itself appears in that chain - otherwise it would
+            # become an ancestor of its own ancestor, breaking the tree.
+            ancestor = parent
+            while ancestor is not None:
+                if ancestor.id == subtask.id:
+                    raise HTTPException(
+                        status_code=422, detail="cannot move a subtask under its own descendant"
+                    )
+                ancestor = db.get(models.Subtask, ancestor.parent_id) if ancestor.parent_id else None
+        subtask.parent_id = new_parent_id
+        # Re-append to the end of the new sibling group - the old `position`
+        # was only meaningful within the old group and could collide with an
+        # existing position in the new one (indent/outdent, not a reorder).
+        last = (
+            db.query(models.Subtask)
+            .filter(
+                models.Subtask.project_id == subtask.project_id,
+                models.Subtask.parent_id == new_parent_id,
+                models.Subtask.id != subtask.id,
+            )
+            .order_by(models.Subtask.position.desc())
+            .first()
+        )
+        subtask.position = (last.position + 1) if last else 0
     db.commit()
     db.refresh(subtask)
     return subtask
@@ -160,12 +208,17 @@ def delete_subtask(subtask_id: int, db: Session = Depends(get_db)):
 def reorder_subtasks(project_id: int, payload: schemas.SubtaskReorder, db: Session = Depends(get_db)):
     subtasks = {
         s.id: s
-        for s in db.query(models.Subtask).filter(models.Subtask.project_id == project_id).all()
+        for s in db.query(models.Subtask)
+        .filter(
+            models.Subtask.project_id == project_id,
+            models.Subtask.parent_id == payload.parent_id,
+        )
+        .all()
     }
     if set(payload.ordered_ids) != set(subtasks.keys()):
         raise HTTPException(
             status_code=400,
-            detail="ordered_ids must match the project's current subtask ids exactly",
+            detail="ordered_ids must match this sibling group's current subtask ids exactly",
         )
     for position, subtask_id in enumerate(payload.ordered_ids):
         subtasks[subtask_id].position = position
