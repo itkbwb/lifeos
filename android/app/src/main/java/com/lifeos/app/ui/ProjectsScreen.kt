@@ -271,7 +271,6 @@ fun ProjectsScreen(
                     items(activeProjects, key = { it.id }) { project ->
                         ProjectTile(
                             project = project,
-                            isActive = activeProject?.project_id == project.id,
                             onClick = { openSubtasksFor = project },
                             onEdit = {
                                 dialogError = ""
@@ -537,7 +536,6 @@ fun ProjectsScreen(
 @Composable
 private fun ProjectTile(
     project: Project,
-    isActive: Boolean,
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onStart: () -> Unit,
@@ -546,11 +544,6 @@ private fun ProjectTile(
 ) {
     val color = ProjectColors.colorFor(project.color)
     val onColor = ProjectColors.contrastingTextColor(color)
-    // Dimmed (not just "different icon") so it's visually obvious which of
-    // the two is actually usable right now - Stop only ever "lights up" for
-    // the one tile that is truly the active project (chapter: separate
-    // play/stop buttons), never for every tile at once.
-    val disabledTint = onColor.copy(alpha = 0.35f)
 
     Row(
         modifier = Modifier
@@ -572,14 +565,14 @@ private fun ProjectTile(
             Icon(
                 imageVector = Icons.Filled.PlayArrow,
                 contentDescription = "Начать",
-                tint = if (isActive) disabledTint else onColor,
+                tint = onColor,
             )
         }
         IconButton(onClick = onStop) {
             Icon(
                 imageVector = Icons.Filled.Stop,
                 contentDescription = "Завершить",
-                tint = if (isActive) onColor else disabledTint,
+                tint = onColor,
             )
         }
         IconButton(onClick = onInstant) {
