@@ -121,6 +121,7 @@ class PlanEntryCreate(BaseModel):
     start_time: datetime
     end_time: datetime
     name: Optional[str] = None
+    subtask_id: Optional[int] = None
 
     @field_validator("end_time")
     @classmethod
@@ -147,6 +148,7 @@ class PlanEntryOut(BaseModel):
     start_time: datetime
     end_time: datetime
     name: Optional[str]
+    subtask_id: Optional[int]
     created_at: datetime
 
 
@@ -196,17 +198,25 @@ class DynamicPlanEntryOut(BaseModel):
     start_time: datetime
     end_time: datetime
     name: Optional[str]
+    subtask_id: Optional[int]
 
 
 class PlanEntryUpdate(BaseModel):
     """Direct mutation of a Static Plan entry (chapter 5.7 - unlike a PlanChange,
     this is a correction to the record itself, used from the Static tab of Day
-    Summary). All fields optional/partial; only provided ones are applied."""
+    Summary). All fields optional/partial; only provided ones are applied.
+
+    `subtask_id` is the one field that needs explicit-null ("unlink") support -
+    the endpoint checks `model_fields_set` for it rather than treating `None`
+    as "not provided", so a client can send `{"subtask_id": null}` to clear
+    the link (a bare-omitted field still means "don't change" for every field,
+    including this one)."""
 
     project_id: Optional[int] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     name: Optional[str] = None
+    subtask_id: Optional[int] = None
 
     @field_validator("name")
     @classmethod
@@ -230,6 +240,65 @@ class ImportRowError(BaseModel):
 class ImportResult(BaseModel):
     created: int
     projects_created: list[str]
+    errors: list[ImportRowError]
+
+
+class ImportSubtask(BaseModel):
+    title: str
+    done: bool = False
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("title must not be empty")
+        return v
+
+
+class ImportStaticEntry(BaseModel):
+    date: str
+    start: str
+    end: str
+    name: Optional[str] = None
+    subtask_title: Optional[str] = None
+
+
+class ImportProjectRequest(BaseModel):
+    """A whole-project export/import file (chapter: project import) - project
+    identity, its checklist, and optionally pre-scheduled Static entries that
+    can reference a checklist item by title. Distinct from the flat CSV
+    importer above, which only ever creates Static entries."""
+
+    project_name: str
+    color: Optional[str] = None
+    subtasks: list[ImportSubtask] = []
+    static_entries: list[ImportStaticEntry] = []
+    tz_offset_minutes: int = 0
+
+    @field_validator("project_name")
+    @classmethod
+    def project_name_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("project_name must not be empty")
+        return v
+
+    @field_validator("color")
+    @classmethod
+    def color_in_palette(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if v not in PROJECT_COLORS:
+            raise ValueError(f"color must be one of {sorted(PROJECT_COLORS)}")
+        return v
+
+
+class ImportProjectResult(BaseModel):
+    project_id: int
+    project_created: bool
+    subtasks_created: int
+    static_entries_created: int
     errors: list[ImportRowError]
 
 

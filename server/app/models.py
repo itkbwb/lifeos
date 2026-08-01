@@ -70,6 +70,12 @@ class PlanEntry(Base):
     start_time: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
     end_time: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Optional link to a checklist item this scheduled block is meant to work on
+    # (chapter: planning subtasks) - SET NULL (not CASCADE/RESTRICT) so deleting
+    # the subtask un-links it instead of destroying scheduling history.
+    subtask_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("subtasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime,
         default=lambda: datetime.now(timezone.utc),

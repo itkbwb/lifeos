@@ -7,6 +7,7 @@ data class PlanEntry(
     val end_time: String,
     val name: String?,
     val created_at: String,
+    val subtask_id: Int? = null,
 )
 
 data class DynamicPlanEntry(
@@ -15,6 +16,7 @@ data class DynamicPlanEntry(
     val start_time: String,
     val end_time: String,
     val name: String?,
+    val subtask_id: Int? = null,
 )
 
 data class PlanChange(
@@ -34,6 +36,14 @@ data class ImportRowError(
 data class ImportResult(
     val created: Int,
     val projects_created: List<String>,
+    val errors: List<ImportRowError>,
+)
+
+data class ImportProjectResult(
+    val project_id: Int,
+    val project_created: Boolean,
+    val subtasks_created: Int,
+    val static_entries_created: Int,
     val errors: List<ImportRowError>,
 )
 

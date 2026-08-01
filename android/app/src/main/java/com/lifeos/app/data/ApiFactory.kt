@@ -1,6 +1,7 @@
 package com.lifeos.app.data
 
 import com.google.gson.Gson
+import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 import java.io.IOException
@@ -21,6 +22,14 @@ object ApiFactory {
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
     private val gson = Gson()
+
+    // Gson's writer drops JsonNull properties from a JsonElement tree during
+    // serialization unless serializeNulls() is set on the instance - this applies
+    // even to nulls added explicitly (not just reflected Java nulls), so a plain
+    // Gson().toJson(jsonObjectWithNull) silently omits the key. Needed wherever a
+    // client-side "unset/clear this field" needs to reach the server as an
+    // explicit `"field": null`, not an omitted key.
+    private val gsonSerializeNulls = com.google.gson.GsonBuilder().serializeNulls().create()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     /** Blocking call - run on a background dispatcher. */
@@ -261,11 +270,13 @@ object ApiFactory {
         startTime: String,
         endTime: String,
         name: String? = null,
+        subtaskId: Int? = null,
     ): PlanEntry {
         val fields = mutableMapOf<String, Any>(
             "project_id" to projectId, "start_time" to startTime, "end_time" to endTime,
         )
         name?.let { fields["name"] = it }
+        subtaskId?.let { fields["subtask_id"] = it }
         val json = gson.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/plan/entries")
@@ -390,13 +401,23 @@ object ApiFactory {
         startTime: String? = null,
         endTime: String? = null,
         name: String? = null,
+        subtaskId: Int? = null,
+        clearSubtask: Boolean = false,
     ): PlanEntry {
-        val fields = mutableMapOf<String, Any>()
-        projectId?.let { fields["project_id"] = it }
-        startTime?.let { fields["start_time"] = it }
-        endTime?.let { fields["end_time"] = it }
-        name?.let { fields["name"] = it }
-        val json = gson.toJson(fields)
+        // A plain Map skips null values entirely when serialized (Gson's default
+        // serializeNulls=false), which would make clearSubtask a no-op - JsonObject
+        // lets us add an explicit JsonNull the server can tell apart from "omitted"
+        // via Pydantic's model_fields_set. Serializing with gsonSerializeNulls (not
+        // the default gson) is required too - Gson's writer drops JsonNull tree
+        // nodes during toJson() unless serializeNulls() is set on the instance,
+        // even for nulls added explicitly rather than via reflection.
+        val fields = JsonObject()
+        projectId?.let { fields.addProperty("project_id", it) }
+        startTime?.let { fields.addProperty("start_time", it) }
+        endTime?.let { fields.addProperty("end_time", it) }
+        name?.let { fields.addProperty("name", it) }
+        if (clearSubtask) fields.add("subtask_id", JsonNull.INSTANCE) else subtaskId?.let { fields.addProperty("subtask_id", it) }
+        val json = gsonSerializeNulls.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/plan/entries/$id")
             .patch(json.toRequestBody(jsonMediaType))
@@ -447,6 +468,33 @@ object ApiFactory {
                 throw IOException("importCsv failed: HTTP ${response.code} $body")
             }
             return gson.fromJson(body ?: throw IOException("importCsv: empty response body"), ImportResult::class.java)
+        }
+    }
+
+    /**
+     * Blocking call - run on a background dispatcher. Throws IOException on failure.
+     * `projectJson` is sent as-is (already matches the server's ImportProjectRequest
+     * shape) - unlike [importCsv], there's no client-side wrapping into an envelope.
+     */
+    fun importProject(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectJson: String,
+    ): ImportProjectResult {
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/import/project")
+            .post(projectJson.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            val body = response.body?.string()
+            if (!response.isSuccessful) {
+                throw IOException("importProject failed: HTTP ${response.code} $body")
+            }
+            return gson.fromJson(
+                body ?: throw IOException("importProject: empty response body"),
+                ImportProjectResult::class.java,
+            )
         }
     }
 

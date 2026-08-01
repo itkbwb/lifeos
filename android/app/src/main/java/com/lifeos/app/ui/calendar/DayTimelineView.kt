@@ -173,11 +173,14 @@ fun DayTimelineView(
         StaticPlanFormDialog(
             projects = projects,
             errorMessage = planErrorMessage,
+            serverUrl = serverUrl,
+            accessClientId = accessClientId,
+            accessClientSecret = accessClientSecret,
             onDismiss = {
                 showPlanDialog = false
                 planErrorMessage = ""
             },
-            onConfirm = { projectId, startTime, endTime, name ->
+            onConfirm = { projectId, startTime, endTime, name, subtaskId ->
                 val zone = ZoneId.systemDefault()
                 val startInstant = date.atTime(startTime).atZone(zone).toInstant().toString()
                 val endInstant = date.atTime(endTime).atZone(zone).toInstant().toString()
@@ -192,6 +195,7 @@ fun DayTimelineView(
                                 startTime = startInstant,
                                 endTime = endInstant,
                                 name = name,
+                                subtaskId = subtaskId,
                             )
                         }
                     }.onSuccess {

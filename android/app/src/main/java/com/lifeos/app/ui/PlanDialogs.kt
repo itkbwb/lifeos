@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,14 +28,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.DynamicPlanEntry
 import com.lifeos.app.data.PlanEntry
 import com.lifeos.app.data.Project
+import com.lifeos.app.data.Subtask
 import com.lifeos.app.ui.theme.ProjectColors
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun ProjectPicker(projects: List<Project>, selectedId: Int?, onSelect: (Int) -> Unit) {
@@ -71,6 +76,42 @@ internal fun ProjectPicker(projects: List<Project>, selectedId: Int?, onSelect: 
 }
 
 /**
+ * Subtask equivalent of [ProjectPicker] (chapter: planning subtasks) - lets a
+ * scheduled block optionally target one checklist item of the selected
+ * project. "Без подзадачи" (null) is always the first chip since linking is
+ * optional - most Static/Dynamic entries won't reference a subtask at all.
+ */
+@Composable
+internal fun SubtaskPicker(subtasks: List<Subtask>, selectedId: Int?, onSelect: (Int?) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        listOf<Subtask?>(null).plus(subtasks).forEach { subtask ->
+            val isSelected = subtask?.id == selectedId
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .then(
+                        if (isSelected) {
+                            Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, RoundedCornerShape(16.dp))
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .clickable { onSelect(subtask?.id) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(subtask?.title ?: "Без подзадачи", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/**
  * Creates a Static Plan entry (chapter 4.5/4.6) for a fixed day: pick a project (required -
  * a plan cannot exist without one) and a start/end time. The entry is immutable once
  * created; rescheduling later goes through a PlanChange, not this dialog.
@@ -79,13 +120,30 @@ internal fun ProjectPicker(projects: List<Project>, selectedId: Int?, onSelect: 
 fun StaticPlanFormDialog(
     projects: List<Project>,
     errorMessage: String,
+    serverUrl: String,
+    accessClientId: String = "",
+    accessClientSecret: String = "",
     onDismiss: () -> Unit,
-    onConfirm: (projectId: Int, startTime: LocalTime, endTime: LocalTime, name: String?) -> Unit,
+    onConfirm: (projectId: Int, startTime: LocalTime, endTime: LocalTime, name: String?, subtaskId: Int?) -> Unit,
 ) {
     var selectedProjectId by remember { mutableStateOf(projects.firstOrNull()?.id) }
     var startText by remember { mutableStateOf("09:00") }
     var endText by remember { mutableStateOf("10:00") }
     var name by remember { mutableStateOf("") }
+    var subtasks by remember { mutableStateOf<List<Subtask>>(emptyList()) }
+    var selectedSubtaskId by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(selectedProjectId, serverUrl) {
+        val projectId = selectedProjectId
+        subtasks = if (projectId == null) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching { ApiFactory.listSubtasks(serverUrl, accessClientId, accessClientSecret, projectId) }
+            }.getOrDefault(emptyList())
+        }
+        if (subtasks.none { it.id == selectedSubtaskId }) selectedSubtaskId = null
+    }
 
     val startTime = runCatching { LocalTime.parse(startText) }.getOrNull()
     val endTime = runCatching { LocalTime.parse(endText) }.getOrNull()
@@ -122,6 +180,10 @@ fun StaticPlanFormDialog(
                         placeholder = { Text("10:00") },
                     )
                 }
+                if (subtasks.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    SubtaskPicker(subtasks, selectedSubtaskId, onSelect = { selectedSubtaskId = it })
+                }
                 if (errorMessage.isNotBlank()) {
                     Spacer(Modifier.height(12.dp))
                     Text(errorMessage, color = MaterialTheme.colorScheme.error)
@@ -130,7 +192,9 @@ fun StaticPlanFormDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(selectedProjectId!!, startTime!!, endTime!!, name.ifBlank { null }) },
+                onClick = {
+                    onConfirm(selectedProjectId!!, startTime!!, endTime!!, name.ifBlank { null }, selectedSubtaskId)
+                },
                 enabled = isValid,
             ) {
                 Text("Запланировать")
@@ -158,6 +222,9 @@ private fun PlanEntryFields(
     onStartChange: (String) -> Unit,
     endText: String,
     onEndChange: (String) -> Unit,
+    subtasks: List<Subtask>,
+    subtaskId: Int?,
+    onSubtaskSelect: (Int?) -> Unit,
     errorMessage: String,
 ) {
     Column {
@@ -195,11 +262,42 @@ private fun PlanEntryFields(
                 placeholder = { Text("10:00") },
             )
         }
+        if (subtasks.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            SubtaskPicker(subtasks, subtaskId, onSelect = onSubtaskSelect)
+        }
         if (errorMessage.isNotBlank()) {
             Spacer(Modifier.height(12.dp))
             Text(errorMessage, color = MaterialTheme.colorScheme.error)
         }
     }
+}
+
+/** Fetches `projectId`'s subtasks, refetching whenever the project changes -
+ * shared by [PlanEntryEditDialog] and [DynamicEntryEditDialog]. Clears the
+ * current subtask selection if it no longer belongs to the newly-loaded list
+ * (e.g. the user switched to a different project). */
+@Composable
+private fun rememberProjectSubtasks(
+    projectId: Int?,
+    serverUrl: String,
+    accessClientId: String,
+    accessClientSecret: String,
+    currentSubtaskId: Int?,
+    onSubtaskInvalid: () -> Unit,
+): List<Subtask> {
+    var subtasks by remember { mutableStateOf<List<Subtask>>(emptyList()) }
+    LaunchedEffect(projectId, serverUrl) {
+        subtasks = if (projectId == null) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching { ApiFactory.listSubtasks(serverUrl, accessClientId, accessClientSecret, projectId) }
+            }.getOrDefault(emptyList())
+        }
+        if (currentSubtaskId != null && subtasks.none { it.id == currentSubtaskId }) onSubtaskInvalid()
+    }
+    return subtasks
 }
 
 /**
@@ -213,17 +311,26 @@ fun PlanEntryEditDialog(
     projects: List<Project>,
     errorMessage: String,
     zone: ZoneId = ZoneId.systemDefault(),
+    serverUrl: String,
+    accessClientId: String = "",
+    accessClientSecret: String = "",
     onDismiss: () -> Unit,
-    onSave: (projectId: Int, start: Instant, end: Instant, name: String) -> Unit,
+    onSave: (projectId: Int, start: Instant, end: Instant, name: String, subtaskId: Int?) -> Unit,
     onRequestDelete: () -> Unit,
 ) {
     var projectId by remember(entry.id) { mutableStateOf<Int?>(entry.project_id) }
     var name by remember(entry.id) { mutableStateOf(entry.name ?: "") }
+    var subtaskId by remember(entry.id) { mutableStateOf(entry.subtask_id) }
     val startZoned = remember(entry.id) { Instant.parse(entry.start_time).atZone(zone) }
     val endZoned = remember(entry.id) { Instant.parse(entry.end_time).atZone(zone) }
     var dateText by remember(entry.id) { mutableStateOf(PLAN_DATE_FORMAT.format(startZoned.toLocalDate())) }
     var startText by remember(entry.id) { mutableStateOf(PLAN_TIME_FORMAT.format(startZoned.toLocalTime())) }
     var endText by remember(entry.id) { mutableStateOf(PLAN_TIME_FORMAT.format(endZoned.toLocalTime())) }
+
+    val subtasks = rememberProjectSubtasks(
+        projectId, serverUrl, accessClientId, accessClientSecret, subtaskId,
+        onSubtaskInvalid = { subtaskId = null },
+    )
 
     val date = runCatching { LocalDate.parse(dateText, PLAN_DATE_FORMAT) }.getOrNull()
     val startTime = runCatching { LocalTime.parse(startText, PLAN_TIME_FORMAT) }.getOrNull()
@@ -232,6 +339,7 @@ fun PlanEntryEditDialog(
 
     val isDirty = projectId != entry.project_id ||
         name != (entry.name ?: "") ||
+        subtaskId != entry.subtask_id ||
         dateText != PLAN_DATE_FORMAT.format(startZoned.toLocalDate()) ||
         startText != PLAN_TIME_FORMAT.format(startZoned.toLocalTime()) ||
         endText != PLAN_TIME_FORMAT.format(endZoned.toLocalTime())
@@ -258,6 +366,9 @@ fun PlanEntryEditDialog(
                 onStartChange = { startText = it },
                 endText = endText,
                 onEndChange = { endText = it },
+                subtasks = subtasks,
+                subtaskId = subtaskId,
+                onSubtaskSelect = { subtaskId = it },
                 errorMessage = errorMessage,
             )
         },
@@ -270,6 +381,7 @@ fun PlanEntryEditDialog(
                         date!!.atTime(startTime!!).atZone(zone).toInstant(),
                         date.atTime(endTime!!).atZone(zone).toInstant(),
                         name.trim(),
+                        subtaskId,
                     )
                 },
             ) { Text("Сохранить") }
@@ -299,17 +411,26 @@ fun DynamicEntryEditDialog(
     projects: List<Project>,
     errorMessage: String,
     zone: ZoneId = ZoneId.systemDefault(),
+    serverUrl: String,
+    accessClientId: String = "",
+    accessClientSecret: String = "",
     onDismiss: () -> Unit,
-    onSave: (projectId: Int, start: Instant, end: Instant, name: String) -> Unit,
+    onSave: (projectId: Int, start: Instant, end: Instant, name: String, subtaskId: Int?) -> Unit,
     onRequestDelete: () -> Unit,
 ) {
     var projectId by remember(entry.id) { mutableStateOf<Int?>(entry.project_id) }
     var name by remember(entry.id) { mutableStateOf(entry.name ?: "") }
+    var subtaskId by remember(entry.id) { mutableStateOf(entry.subtask_id) }
     val startZoned = remember(entry.id) { Instant.parse(entry.start_time).atZone(zone) }
     val endZoned = remember(entry.id) { Instant.parse(entry.end_time).atZone(zone) }
     var dateText by remember(entry.id) { mutableStateOf(PLAN_DATE_FORMAT.format(startZoned.toLocalDate())) }
     var startText by remember(entry.id) { mutableStateOf(PLAN_TIME_FORMAT.format(startZoned.toLocalTime())) }
     var endText by remember(entry.id) { mutableStateOf(PLAN_TIME_FORMAT.format(endZoned.toLocalTime())) }
+
+    val subtasks = rememberProjectSubtasks(
+        projectId, serverUrl, accessClientId, accessClientSecret, subtaskId,
+        onSubtaskInvalid = { subtaskId = null },
+    )
 
     val date = runCatching { LocalDate.parse(dateText, PLAN_DATE_FORMAT) }.getOrNull()
     val startTime = runCatching { LocalTime.parse(startText, PLAN_TIME_FORMAT) }.getOrNull()
@@ -318,6 +439,7 @@ fun DynamicEntryEditDialog(
 
     val isDirty = projectId != entry.project_id ||
         name != (entry.name ?: "") ||
+        subtaskId != entry.subtask_id ||
         dateText != PLAN_DATE_FORMAT.format(startZoned.toLocalDate()) ||
         startText != PLAN_TIME_FORMAT.format(startZoned.toLocalTime()) ||
         endText != PLAN_TIME_FORMAT.format(endZoned.toLocalTime())
@@ -344,6 +466,9 @@ fun DynamicEntryEditDialog(
                 onStartChange = { startText = it },
                 endText = endText,
                 onEndChange = { endText = it },
+                subtasks = subtasks,
+                subtaskId = subtaskId,
+                onSubtaskSelect = { subtaskId = it },
                 errorMessage = errorMessage,
             )
         },
@@ -356,6 +481,7 @@ fun DynamicEntryEditDialog(
                         date!!.atTime(startTime!!).atZone(zone).toInstant(),
                         date.atTime(endTime!!).atZone(zone).toInstant(),
                         name.trim(),
+                        subtaskId,
                     )
                 },
             ) { Text("Сохранить") }

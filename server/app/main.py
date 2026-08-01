@@ -364,11 +364,17 @@ def create_plan_entry(payload: schemas.PlanEntryCreate, db: Session = Depends(ge
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    if payload.subtask_id is not None:
+        subtask = db.get(models.Subtask, payload.subtask_id)
+        if subtask is None or subtask.project_id != payload.project_id:
+            raise HTTPException(status_code=422, detail="subtask_id must belong to project_id")
+
     entry = models.PlanEntry(
         project_id=payload.project_id,
         start_time=payload.start_time,
         end_time=payload.end_time,
         name=payload.name,
+        subtask_id=payload.subtask_id,
     )
     db.add(entry)
     db.commit()
@@ -408,16 +414,22 @@ def update_plan_entry(
     new_start_time = payload.start_time if payload.start_time is not None else entry.start_time
     new_end_time = payload.end_time if payload.end_time is not None else entry.end_time
     new_name = payload.name if "name" in payload.model_fields_set else entry.name
+    new_subtask_id = payload.subtask_id if "subtask_id" in payload.model_fields_set else entry.subtask_id
 
     if new_end_time <= new_start_time:
         raise HTTPException(status_code=422, detail="end_time must be after start_time")
     if db.get(models.Project, new_project_id) is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    if new_subtask_id is not None:
+        subtask = db.get(models.Subtask, new_subtask_id)
+        if subtask is None or subtask.project_id != new_project_id:
+            raise HTTPException(status_code=422, detail="subtask_id must belong to project_id")
 
     entry.project_id = new_project_id
     entry.start_time = new_start_time
     entry.end_time = new_end_time
     entry.name = new_name
+    entry.subtask_id = new_subtask_id
     db.commit()
     db.refresh(entry)
     return entry
@@ -519,6 +531,7 @@ def get_dynamic_plan(
                 start_time=start_time,
                 end_time=end_time,
                 name=entry.name,
+                subtask_id=entry.subtask_id,
             )
         )
 
@@ -592,6 +605,98 @@ def import_csv(payload: schemas.ImportRequest, db: Session = Depends(get_db)):
 
     db.commit()
     return schemas.ImportResult(created=created, projects_created=projects_created, errors=errors)
+
+
+@app.post("/api/import/project", response_model=schemas.ImportProjectResult)
+def import_project(payload: schemas.ImportProjectRequest, db: Session = Depends(get_db)):
+    """Imports a whole project - identity, checklist, and optionally
+    pre-scheduled Static entries that can reference a checklist item by title
+    (chapter: project import). Distinct from /api/import/csv, which only ever
+    creates Static entries. Best-effort per-row like the CSV importer: a bad
+    static_entries row is skipped and recorded in `errors`, never aborts the
+    whole import. Re-importing the same file always appends (subtasks are
+    never deduplicated by title), matching the CSV importer's own
+    always-append behavior for Static entries."""
+    tz = timezone(timedelta(minutes=payload.tz_offset_minutes))
+
+    project = db.query(models.Project).filter(models.Project.name == payload.project_name).first()
+    project_created = False
+    if project is None:
+        color = payload.color or _IMPORT_COLORS[db.query(models.Project).count() % len(_IMPORT_COLORS)]
+        project = models.Project(name=payload.project_name, color=color)
+        db.add(project)
+        db.flush()
+        project_created = True
+
+    # title -> id, seeded with the project's pre-existing subtasks so
+    # static_entries can reference checklist items from an earlier import,
+    # not just ones created by this request.
+    title_to_subtask_id: dict[str, int] = {
+        s.title: s.id
+        for s in db.query(models.Subtask).filter(models.Subtask.project_id == project.id).all()
+    }
+    last_position = max(
+        (
+            s.position
+            for s in db.query(models.Subtask).filter(models.Subtask.project_id == project.id).all()
+        ),
+        default=-1,
+    )
+
+    subtasks_created = 0
+    for item in payload.subtasks:
+        last_position += 1
+        subtask = models.Subtask(
+            project_id=project.id, title=item.title, done=item.done, position=last_position
+        )
+        db.add(subtask)
+        db.flush()
+        title_to_subtask_id[item.title] = subtask.id
+        subtasks_created += 1
+
+    static_entries_created = 0
+    errors: list[schemas.ImportRowError] = []
+    for row_num, item in enumerate(payload.static_entries, start=1):
+        try:
+            date = datetime.strptime(item.date, "%Y-%m-%d").date()
+            start_time_local = datetime.strptime(item.start, "%H:%M").time()
+            end_time_local = datetime.strptime(item.end, "%H:%M").time()
+            start_dt = datetime.combine(date, start_time_local, tzinfo=tz)
+            end_dt = datetime.combine(date, end_time_local, tzinfo=tz)
+            if end_dt <= start_dt:
+                raise ValueError("end must be after start")
+
+            subtask_id = None
+            if item.subtask_title is not None:
+                subtask_id = title_to_subtask_id.get(item.subtask_title)
+                if subtask_id is None:
+                    errors.append(
+                        schemas.ImportRowError(
+                            row=row_num, message=f"subtask_title not found: {item.subtask_title!r}"
+                        )
+                    )
+
+            db.add(
+                models.PlanEntry(
+                    project_id=project.id,
+                    start_time=start_dt,
+                    end_time=end_dt,
+                    name=item.name,
+                    subtask_id=subtask_id,
+                )
+            )
+            static_entries_created += 1
+        except ValueError as exc:
+            errors.append(schemas.ImportRowError(row=row_num, message=str(exc)))
+
+    db.commit()
+    return schemas.ImportProjectResult(
+        project_id=project.id,
+        project_created=project_created,
+        subtasks_created=subtasks_created,
+        static_entries_created=static_entries_created,
+        errors=errors,
+    )
 
 
 @app.post("/api/admin/clear", response_model=schemas.ClearResult)

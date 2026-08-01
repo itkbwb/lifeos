@@ -579,17 +579,22 @@ fun DashboardScreen(
             projects = projects.filter { !it.archived || it.id == entry.project_id },
             errorMessage = editDynamicError,
             zone = zone,
+            serverUrl = serverUrl,
+            accessClientId = accessClientId,
+            accessClientSecret = accessClientSecret,
             onDismiss = {
                 showEditDynamicDialog = false
                 editDynamicError = ""
             },
             onRequestDelete = { actionState = DashboardActionState.DeleteDynamicConfirm },
-            onSave = { projectId, start, end, name ->
+            onSave = { projectId, start, end, name, subtaskId ->
                 scope.launch {
                     val result = withContext(Dispatchers.IO) {
                         runCatching {
                             val timeChanged = start.toString() != entry.start_time || end.toString() != entry.end_time
-                            val identityChanged = projectId != entry.project_id || name != (entry.name ?: "")
+                            val identityChanged = projectId != entry.project_id ||
+                                name != (entry.name ?: "") ||
+                                subtaskId != entry.subtask_id
                             if (timeChanged) {
                                 ApiFactory.createPlanChange(
                                     serverUrl, accessClientId, accessClientSecret,
@@ -601,6 +606,7 @@ fun DashboardScreen(
                                 ApiFactory.updatePlanEntry(
                                     serverUrl, accessClientId, accessClientSecret,
                                     id = entry.id, projectId = projectId, name = name,
+                                    subtaskId = subtaskId, clearSubtask = subtaskId == null,
                                 )
                             }
                         }

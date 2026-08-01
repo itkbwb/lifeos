@@ -286,9 +286,12 @@ private fun DaySummaryContent(
             projects = projects,
             errorMessage = saveError,
             zone = zone,
+            serverUrl = serverUrl,
+            accessClientId = accessClientId,
+            accessClientSecret = accessClientSecret,
             onDismiss = { editingStatic = null; saveError = "" },
             onRequestDelete = { deleteTarget = DeleteTarget.StaticTarget(entry) },
-            onSave = { projectId, start, end, name ->
+            onSave = { projectId, start, end, name, subtaskId ->
                 scope.launch {
                     val result = withContext(Dispatchers.IO) {
                         runCatching {
@@ -296,6 +299,7 @@ private fun DaySummaryContent(
                                 serverUrl, accessClientId, accessClientSecret,
                                 id = entry.id, projectId = projectId,
                                 startTime = start.toString(), endTime = end.toString(), name = name,
+                                subtaskId = subtaskId, clearSubtask = subtaskId == null,
                             )
                         }
                     }
@@ -310,6 +314,7 @@ private fun DaySummaryContent(
                                     id = entry.id, projectId = entry.project_id,
                                     startTime = entry.start_time, endTime = entry.end_time,
                                     name = entry.name ?: "",
+                                    subtaskId = entry.subtask_id, clearSubtask = entry.subtask_id == null,
                                 )
                             },
                         )
@@ -326,14 +331,19 @@ private fun DaySummaryContent(
             projects = projects,
             errorMessage = saveError,
             zone = zone,
+            serverUrl = serverUrl,
+            accessClientId = accessClientId,
+            accessClientSecret = accessClientSecret,
             onDismiss = { editingDynamic = null; saveError = "" },
             onRequestDelete = { deleteTarget = DeleteTarget.DynamicTarget(entry) },
-            onSave = { projectId, start, end, name ->
+            onSave = { projectId, start, end, name, subtaskId ->
                 scope.launch {
                     val result = withContext(Dispatchers.IO) {
                         runCatching {
                             val timeChanged = start.toString() != entry.start_time || end.toString() != entry.end_time
-                            val identityChanged = projectId != entry.project_id || name != (entry.name ?: "")
+                            val identityChanged = projectId != entry.project_id ||
+                                name != (entry.name ?: "") ||
+                                subtaskId != entry.subtask_id
                             var changeId: Int? = null
                             if (timeChanged) {
                                 changeId = ApiFactory.createPlanChange(
@@ -346,6 +356,7 @@ private fun DaySummaryContent(
                                 ApiFactory.updatePlanEntry(
                                     serverUrl, accessClientId, accessClientSecret,
                                     id = entry.id, projectId = projectId, name = name,
+                                    subtaskId = subtaskId, clearSubtask = subtaskId == null,
                                 )
                             }
                             changeId
@@ -360,11 +371,15 @@ private fun DaySummaryContent(
                                 if (changeId != null) {
                                     ApiFactory.deletePlanChange(serverUrl, accessClientId, accessClientSecret, changeId)
                                 }
-                                if (staticEntry != null && (projectId != entry.project_id || name != (entry.name ?: ""))) {
+                                val identityChanged = projectId != entry.project_id ||
+                                    name != (entry.name ?: "") ||
+                                    subtaskId != entry.subtask_id
+                                if (staticEntry != null && identityChanged) {
                                     ApiFactory.updatePlanEntry(
                                         serverUrl, accessClientId, accessClientSecret,
                                         id = entry.id, projectId = staticEntry.project_id,
                                         name = staticEntry.name ?: "",
+                                        subtaskId = staticEntry.subtask_id, clearSubtask = staticEntry.subtask_id == null,
                                     )
                                 }
                             },

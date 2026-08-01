@@ -1,5 +1,7 @@
 package com.lifeos.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -42,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,6 +60,7 @@ import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.Project
 import com.lifeos.app.data.ProjectHasRecordsException
 import com.lifeos.app.ui.theme.ProjectColors
+import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -88,8 +94,40 @@ fun ProjectsScreen(
     var dialogError by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(false) }
     var openSubtasksFor by remember { mutableStateOf<Project?>(null) }
+    var importStatus by remember { mutableStateOf("") }
 
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // Whole-project import (chapter: project import) - a self-contained JSON file
+    // (project + subtasks + optionally Static entries) picked from disk, distinct
+    // from the flat CSV importer in Settings which only ever creates Static entries.
+    val importProjectLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            importStatus = "Импорт…"
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: throw IllegalStateException("не удалось открыть файл")
+                    ApiFactory.importProject(serverUrl, accessClientId, accessClientSecret, json)
+                }
+            }
+            result.fold(
+                onSuccess = { r ->
+                    importStatus = buildString {
+                        append(if (r.project_created) "Проект создан" else "Проект обновлён")
+                        append(", подзадач: ${r.subtasks_created}, записей плана: ${r.static_entries_created}")
+                        if (r.errors.isNotEmpty()) {
+                            append(", ошибок: ${r.errors.size} (строка ${r.errors.first().row}: ${r.errors.first().message})")
+                        }
+                    }
+                    refreshToken++
+                },
+                onFailure = { importStatus = "Не удалось импортировать проект" },
+            )
+        }
+    }
 
     suspend fun reload() {
         loadState = LoadState.Loading
@@ -183,10 +221,17 @@ fun ProjectsScreen(
             TopAppBar(title = { Text("Проекты") })
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = {
-                dialogError = ""
-                dialogState = DialogState.Create
-            }) { Text("+") }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SmallFloatingActionButton(
+                    onClick = { importProjectLauncher.launch(arrayOf("application/json", "*/*")) },
+                ) {
+                    Icon(Icons.Filled.UploadFile, contentDescription = "Импортировать проект")
+                }
+                FloatingActionButton(onClick = {
+                    dialogError = ""
+                    dialogState = DialogState.Create
+                }) { Text("+") }
+            }
         },
     ) { padding ->
         when (loadState) {
@@ -218,6 +263,11 @@ fun ProjectsScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    if (importStatus.isNotBlank()) {
+                        item(key = "import-status") {
+                            Text(importStatus, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                     items(activeProjects, key = { it.id }) { project ->
                         ProjectTile(
                             project = project,

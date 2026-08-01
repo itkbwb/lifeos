@@ -76,3 +76,12 @@ def ensure_schema_migrations():
         if "archived" not in columns:
             conn.exec_driver_sql("ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
             conn.commit()
+
+        plan_entry_columns = {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(plan_entries)").fetchall()
+        }
+        if "subtask_id" not in plan_entry_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE plan_entries ADD COLUMN subtask_id INTEGER REFERENCES subtasks(id) ON DELETE SET NULL"
+            )
+            conn.commit()
