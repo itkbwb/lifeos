@@ -310,10 +310,11 @@ fun DashboardScreen(
                     },
             )
 
-            // Gap between Day D and the arc's peak tuned to match the gap between the Stop
-            // button and the arc's nearest edge (88px measured on a real screenshot) - was
-            // 59px with no extra spacer, so +11dp closes the 29px difference.
-            Spacer(Modifier.height(11.dp))
+            // All inter-block gaps (top bar<->Day D, Day D<->timer block, timer block<->gauge,
+            // gauge<->date, date<->bottom nav) use the same weight(1f) so they come out equal
+            // - fixed dp gaps tuned by pixel-measuring one emulator screenshot looked right
+            // there but were visibly uneven on a real device with different proportions.
+            Spacer(Modifier.weight(1f))
 
             if (timerTarget != null) {
                 val arcHeight = 117.dp
@@ -463,12 +464,10 @@ fun DashboardScreen(
                 }
             }
 
+            Spacer(Modifier.weight(1f))
+
             Box(
-                // top padding tuned so the gap between the project-name text and the gauge's
-                // own Static ring matches the gap between Day D and the top bar above it
-                // (target 219px) - measured via a clean single-screenshot pixel scan (text
-                // bottom, ring top at the gauge's true 12-o'clock point), not eyeballed.
-                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 51.5.dp, bottom = 24.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 DayGauge(
@@ -477,7 +476,8 @@ fun DashboardScreen(
                     modifier = Modifier.size(280.dp),
                 )
             }
-            Spacer(Modifier.height(8.dp))
+
+            Spacer(Modifier.weight(1f))
             Text(
                 text = today.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale("ru")))
                     .replaceFirstChar { it.titlecase(java.util.Locale("ru")) },
