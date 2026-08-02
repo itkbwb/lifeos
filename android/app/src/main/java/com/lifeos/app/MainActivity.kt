@@ -38,6 +38,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import com.google.firebase.messaging.FirebaseMessaging
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.SettingsStore
@@ -197,31 +199,31 @@ private fun LifeOsRoot(
                     selected = section == Section.Dashboard,
                     onClick = { section = Section.Dashboard },
                     icon = { Icon(Icons.Default.Speed, contentDescription = null) },
-                    label = { Text("Дашборд") },
+                    label = { NavLabel("Дашборд") },
                 )
                 NavigationBarItem(
                     selected = section == Section.Calendar,
                     onClick = { section = Section.Calendar },
                     icon = { Icon(Icons.Default.DateRange, contentDescription = null) },
-                    label = { Text("Календарь") },
+                    label = { NavLabel("Календарь") },
                 )
                 NavigationBarItem(
                     selected = section == Section.Projects,
                     onClick = { section = Section.Projects },
                     icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                    label = { Text("Проекты") },
+                    label = { NavLabel("Проекты") },
                 )
                 NavigationBarItem(
                     selected = section == Section.Reminders,
                     onClick = { section = Section.Reminders },
                     icon = { Icon(Icons.Default.Notifications, contentDescription = null) },
-                    label = { Text("Напоминания") },
+                    label = { NavLabel("Напоминания") },
                 )
                 NavigationBarItem(
                     selected = section == Section.Settings,
                     onClick = { section = Section.Settings },
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                    label = { Text("Настройки") },
+                    label = { NavLabel("Настройки") },
                 )
             }
         },
@@ -309,6 +311,29 @@ private fun LifeOsRoot(
             }
         }
     }
+}
+
+/**
+ * Bottom nav label that shrinks in steps until it fits on one line, instead of wrapping mid-word
+ * ("Напомина"/"ния") - now that there are 5 tabs, the fixed default size no longer fits all of
+ * them. Compose BOM 2024.06.00 predates Text's built-in autoSize (added in Compose 1.8), so this
+ * hand-rolls the same "shrink until it fits" behavior via onTextLayout.
+ */
+@Composable
+private fun NavLabel(text: String) {
+    var fontSize by remember(text) { mutableStateOf(12.sp) }
+    Text(
+        text = text,
+        fontSize = fontSize,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        onTextLayout = { result ->
+            if (result.didOverflowWidth && fontSize > 8.sp) {
+                fontSize = (fontSize.value - 1).sp
+            }
+        },
+    )
 }
 
 private enum class Section { Dashboard, Calendar, Projects, Reminders, Settings }
