@@ -878,6 +878,12 @@ def import_project(payload: schemas.ImportProjectRequest, db: Session = Depends(
     unlike Static entries below, which are still always appended every time
     (same as the CSV importer's own always-append behavior).
 
+    Any node in the tree may set `is_checklist: true` to import it as an
+    instant-checklist container (chapter: checklist entity) instead of a
+    plain subtask - only applied when the node is newly created (dedup'd
+    nodes keep whatever `is_checklist` they already had, same as `done`
+    being left untouched above).
+
     subtask_title on a Static entry still resolves via a FLAT title->id map
     (last-title-wins on collision) - known limitation: if the same title
     appears more than once in the tree (under different parents), which
@@ -943,6 +949,7 @@ def import_project(payload: schemas.ImportProjectRequest, db: Session = Depends(
                     title=item.title,
                     done=item.done,
                     position=position,
+                    is_checklist=item.is_checklist,
                 )
                 db.add(subtask)
                 db.flush()

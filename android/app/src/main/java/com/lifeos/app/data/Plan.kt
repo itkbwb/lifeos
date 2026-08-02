@@ -60,6 +60,7 @@ data class ImportProjectResult(
 data class ImportSubtaskPayload(
     val title: String,
     val done: Boolean = false,
+    val is_checklist: Boolean = false,
     val subtasks: List<ImportSubtaskPayload> = emptyList(),
 )
 

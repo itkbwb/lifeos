@@ -270,6 +270,7 @@ class ImportSubtask(BaseModel):
 
     title: str
     done: bool = False
+    is_checklist: bool = False
     subtasks: list[ImportSubtask] = []
 
     @field_validator("title")

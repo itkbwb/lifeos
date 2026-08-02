@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -57,6 +58,7 @@ data class ImportTaskNode(
     val localId: Int,
     val title: String,
     val done: Boolean,
+    val isChecklist: Boolean,
     val children: List<ImportTaskNode>,
     val accepted: Boolean = true,
     val alreadyExists: Boolean = false,
@@ -78,6 +80,7 @@ fun buildImportTaskTree(items: List<ImportSubtaskPayload>, existingSubtasks: Lis
             localId = counter++,
             title = item.title,
             done = item.done,
+            isChecklist = item.is_checklist,
             children = walk(item.subtasks, childParentId),
             alreadyExists = existing != null,
         )
@@ -111,7 +114,12 @@ private fun collectExcludedIds(nodes: List<ImportTaskNode>, ancestorExcluded: Bo
  * along). */
 fun pruneToAccepted(nodes: List<ImportTaskNode>): List<ImportSubtaskPayload> =
     nodes.filter { it.accepted }.map { node ->
-        ImportSubtaskPayload(title = node.title, done = node.done, subtasks = pruneToAccepted(node.children))
+        ImportSubtaskPayload(
+            title = node.title,
+            done = node.done,
+            is_checklist = node.isChecklist,
+            subtasks = pruneToAccepted(node.children),
+        )
     }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -188,6 +196,14 @@ fun ProjectImportReviewDialog(
                                 }
                             } else {
                                 Spacer(Modifier.size(24.dp))
+                            }
+                            if (node.isChecklist) {
+                                Icon(
+                                    imageVector = Icons.Filled.Checklist,
+                                    contentDescription = "Чек-лист",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp).padding(start = 8.dp),
+                                )
                             }
                             Text(
                                 text = node.title,
