@@ -23,6 +23,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.lifeos.app.data.ApiFactory
+import com.lifeos.app.data.Project
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,16 +61,46 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var importStatus by remember { mutableStateOf("") }
+    var projects by remember { mutableStateOf<List<Project>>(emptyList()) }
+    // Needed for the CSV review table's "Проект" dropdown+"*новый" marker -
+    // this screen didn't load projects at all before that review step existed.
+    LaunchedEffect(serverUrl) {
+        withContext(Dispatchers.IO) {
+            runCatching { ApiFactory.listProjects(serverUrl, accessClientId, accessClientSecret) }
+        }.onSuccess { projects = it }
+    }
+    // Reviewed-and-edited rows, shown via CsvImportReviewDialog before anything
+    // is actually sent to the server - null means the dialog isn't open.
+    var csvReview by remember { mutableStateOf<List<CsvImportRow>?>(null) }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val csvText = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: throw IllegalStateException("не удалось открыть файл")
+                }
+            }.getOrElse {
+                importStatus = "Не удалось открыть файл"
+                return@launch
+            }
+            val rows = parseCsvRows(csvText)
+            if (rows.isEmpty()) {
+                importStatus = "Не удалось разобрать CSV"
+            } else {
+                csvReview = rows
+            }
+        }
+    }
+
+    fun confirmCsvImport(approvedRows: List<CsvImportRow>) {
+        csvReview = null
         scope.launch {
             importStatus = "Импорт…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val csvText = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                        ?: throw IllegalStateException("не удалось открыть файл")
                     val tzOffsetMinutes = ZonedDateTime.now().offset.totalSeconds / 60
-                    ApiFactory.importCsv(serverUrl, accessClientId, accessClientSecret, csvText, tzOffsetMinutes)
+                    ApiFactory.importCsv(serverUrl, accessClientId, accessClientSecret, toCsv(approvedRows), tzOffsetMinutes)
                 }
             }
             result.fold(
@@ -82,6 +114,15 @@ fun SettingsScreen(
                 onFailure = { importStatus = "Не удалось импортировать" },
             )
         }
+    }
+
+    csvReview?.let { rows ->
+        CsvImportReviewDialog(
+            initialRows = rows,
+            projects = projects,
+            onDismiss = { csvReview = null },
+            onConfirm = ::confirmCsvImport,
+        )
     }
     var clearStatus by remember { mutableStateOf("") }
     var clearConfirmScope by remember { mutableStateOf<String?>(null) }

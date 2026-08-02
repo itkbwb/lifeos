@@ -247,8 +247,15 @@ class ImportResult(BaseModel):
 
 
 class ImportSubtask(BaseModel):
+    """A task in the import file's checklist tree - top-level entries (chapter:
+    Задача) and their nested entries (chapter: Подзадача, any depth) share this
+    same shape; `subtasks` is this node's own children. Self-referential model -
+    works with no extra ceremony under Pydantic v2 + this module's
+    `from __future__ import annotations`."""
+
     title: str
     done: bool = False
+    subtasks: list[ImportSubtask] = []
 
     @field_validator("title")
     @classmethod
@@ -301,6 +308,7 @@ class ImportProjectResult(BaseModel):
     project_id: int
     project_created: bool
     subtasks_created: int
+    subtasks_skipped: int
     static_entries_created: int
     errors: list[ImportRowError]
 

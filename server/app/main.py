@@ -662,14 +662,30 @@ def import_csv(payload: schemas.ImportRequest, db: Session = Depends(get_db)):
 
 @app.post("/api/import/project", response_model=schemas.ImportProjectResult)
 def import_project(payload: schemas.ImportProjectRequest, db: Session = Depends(get_db)):
-    """Imports a whole project - identity, checklist, and optionally
-    pre-scheduled Static entries that can reference a checklist item by title
-    (chapter: project import). Distinct from /api/import/csv, which only ever
-    creates Static entries. Best-effort per-row like the CSV importer: a bad
-    static_entries row is skipped and recorded in `errors`, never aborts the
-    whole import. Re-importing the same file always appends (subtasks are
-    never deduplicated by title), matching the CSV importer's own
-    always-append behavior for Static entries."""
+    """Imports a whole project - identity, a checklist tree (top-level entries
+    are "Задача", their nested entries at any depth are "Подзадача"), and
+    optionally pre-scheduled Static entries that can reference a checklist
+    entry by title (chapter: project import). Distinct from /api/import/csv,
+    which only ever creates Static entries. Best-effort per-row like the CSV
+    importer: a bad static_entries row is skipped and recorded in `errors`,
+    never aborts the whole import.
+
+    Checklist entries ARE deduplicated, by (title, parent) - an entry whose
+    title exactly matches an existing sibling under the same parent (or an
+    existing root entry, for parent=None) is reused rather than recreated;
+    its `done` state is left untouched. This applies WITHIN one import file
+    too: two same-titled siblings in the same `subtasks` payload dedupe
+    against each other (the second reuses the first's freshly-created row),
+    not just against pre-existing rows - a deliberate choice, not an
+    oversight. Re-importing the same file is therefore idempotent for the
+    checklist tree (subtasks_created stays 0, subtasks_skipped grows),
+    unlike Static entries below, which are still always appended every time
+    (same as the CSV importer's own always-append behavior).
+
+    subtask_title on a Static entry still resolves via a FLAT title->id map
+    (last-title-wins on collision) - known limitation: if the same title
+    appears more than once in the tree (under different parents), which
+    entry a Static entry lands on is not guaranteed by position."""
     tz = timezone(timedelta(minutes=payload.tz_offset_minutes))
 
     project = db.query(models.Project).filter(models.Project.name == payload.project_name).first()
@@ -681,31 +697,59 @@ def import_project(payload: schemas.ImportProjectRequest, db: Session = Depends(
         db.flush()
         project_created = True
 
+    existing_subtasks = db.query(models.Subtask).filter(models.Subtask.project_id == project.id).all()
+
+    # (parent_id, title) -> Subtask, seeded from what already exists and kept
+    # live during the walk below (newly-created nodes are inserted into it
+    # immediately) so intra-payload duplicate siblings dedupe too.
+    existing_children_by_parent: dict[int | None, dict[str, models.Subtask]] = {}
+    for s in existing_subtasks:
+        existing_children_by_parent.setdefault(s.parent_id, {})[s.title] = s
+
+    # Highest existing `position` per sibling group (project_id, parent_id) -
+    # the same per-group append-to-end rule create_subtask uses for one
+    # group, generalized to a dict so every group in the tree can be tracked
+    # in memory for the duration of this one request/transaction.
+    last_position_by_parent: dict[int | None, int] = {}
+    for s in existing_subtasks:
+        last_position_by_parent[s.parent_id] = max(last_position_by_parent.get(s.parent_id, -1), s.position)
+
     # title -> id, seeded with the project's pre-existing subtasks so
     # static_entries can reference checklist items from an earlier import,
-    # not just ones created by this request.
-    title_to_subtask_id: dict[str, int] = {
-        s.title: s.id
-        for s in db.query(models.Subtask).filter(models.Subtask.project_id == project.id).all()
-    }
-    last_position = max(
-        (
-            s.position
-            for s in db.query(models.Subtask).filter(models.Subtask.project_id == project.id).all()
-        ),
-        default=-1,
-    )
+    # not just ones created by this request. Flat/last-wins - see docstring.
+    title_to_subtask_id: dict[str, int] = {s.title: s.id for s in existing_subtasks}
 
     subtasks_created = 0
-    for item in payload.subtasks:
-        last_position += 1
-        subtask = models.Subtask(
-            project_id=project.id, title=item.title, done=item.done, position=last_position
-        )
-        db.add(subtask)
-        db.flush()
-        title_to_subtask_id[item.title] = subtask.id
-        subtasks_created += 1
+    subtasks_skipped = 0
+
+    def import_subtask_tree(items: list[schemas.ImportSubtask], parent_id: int | None) -> None:
+        nonlocal subtasks_created, subtasks_skipped
+        for item in items:
+            existing = existing_children_by_parent.get(parent_id, {}).get(item.title)
+            if existing is not None:
+                subtask_id = existing.id
+                subtasks_skipped += 1
+                # `done` on the existing row is intentionally left untouched.
+            else:
+                position = last_position_by_parent.get(parent_id, -1) + 1
+                last_position_by_parent[parent_id] = position
+                subtask = models.Subtask(
+                    project_id=project.id,
+                    parent_id=parent_id,
+                    title=item.title,
+                    done=item.done,
+                    position=position,
+                )
+                db.add(subtask)
+                db.flush()
+                subtask_id = subtask.id
+                subtasks_created += 1
+                existing_children_by_parent.setdefault(parent_id, {})[item.title] = subtask
+            title_to_subtask_id[item.title] = subtask_id
+            if item.subtasks:
+                import_subtask_tree(item.subtasks, subtask_id)
+
+    import_subtask_tree(payload.subtasks, None)
 
     static_entries_created = 0
     errors: list[schemas.ImportRowError] = []
@@ -747,6 +791,7 @@ def import_project(payload: schemas.ImportProjectRequest, db: Session = Depends(
         project_id=project.id,
         project_created=project_created,
         subtasks_created=subtasks_created,
+        subtasks_skipped=subtasks_skipped,
         static_entries_created=static_entries_created,
         errors=errors,
     )

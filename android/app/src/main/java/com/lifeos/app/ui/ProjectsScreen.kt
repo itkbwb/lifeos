@@ -57,8 +57,10 @@ import com.lifeos.app.R
 import com.lifeos.app.data.ActiveProject
 import com.lifeos.app.data.ActiveProjectConflictException
 import com.lifeos.app.data.ApiFactory
+import com.lifeos.app.data.ImportProjectPayload
 import com.lifeos.app.data.Project
 import com.lifeos.app.data.ProjectHasRecordsException
+import com.lifeos.app.data.Subtask
 import com.lifeos.app.ui.theme.ProjectColors
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
@@ -99,34 +101,79 @@ fun ProjectsScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // Whole-project import (chapter: project import) - a self-contained JSON file
-    // (project + subtasks + optionally Static entries) picked from disk, distinct
-    // from the flat CSV importer in Settings which only ever creates Static entries.
+    // Whole-project import (chapter: project import review) - a self-contained
+    // JSON file (project + a nested checklist tree + optionally Static entries)
+    // picked from disk, distinct from the flat CSV importer in Settings which
+    // only ever creates Static entries. Reviewed in ProjectImportReviewDialog
+    // before anything is sent - `importReview` holds the parsed payload plus
+    // whatever's needed to render that review (project-exists badge, existing
+    // subtasks for the client-side "уже есть" cosmetic dedup check).
+    data class ImportReviewState(
+        val payload: ImportProjectPayload,
+        val projectExists: Boolean,
+        val existingSubtasks: List<Subtask>,
+    )
+    var importReview by remember { mutableStateOf<ImportReviewState?>(null) }
     val importProjectLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            importStatus = "Импорт…"
+            importStatus = "Загрузка файла…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
                         ?: throw IllegalStateException("не удалось открыть файл")
-                    ApiFactory.importProject(serverUrl, accessClientId, accessClientSecret, json)
+                    val payload = parseImportProjectPayload(json)
+                    val existingProject = projects.firstOrNull { it.name == payload.project_name }
+                    val existingSubtasks = existingProject?.let {
+                        ApiFactory.listSubtasks(serverUrl, accessClientId, accessClientSecret, it.id)
+                    } ?: emptyList()
+                    Triple(payload, existingProject != null, existingSubtasks)
                 }
             }
             result.fold(
-                onSuccess = { r ->
-                    importStatus = buildString {
-                        append(if (r.project_created) "Проект создан" else "Проект обновлён")
-                        append(", подзадач: ${r.subtasks_created}, записей плана: ${r.static_entries_created}")
-                        if (r.errors.isNotEmpty()) {
-                            append(", ошибок: ${r.errors.size} (строка ${r.errors.first().row}: ${r.errors.first().message})")
-                        }
-                    }
-                    refreshToken++
+                onSuccess = { (payload, exists, existingSubtasks) ->
+                    importStatus = ""
+                    importReview = ImportReviewState(payload, exists, existingSubtasks)
                 },
-                onFailure = { importStatus = "Не удалось импортировать проект" },
+                onFailure = { importStatus = "Не удалось разобрать файл" },
             )
         }
+    }
+
+    importReview?.let { review ->
+        ProjectImportReviewDialog(
+            payload = review.payload,
+            projectExists = review.projectExists,
+            existingSubtasks = review.existingSubtasks,
+            onDismiss = { importReview = null },
+            onConfirm = { finalPayload ->
+                importReview = null
+                scope.launch {
+                    importStatus = "Импорт…"
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.importProject(
+                                serverUrl, accessClientId, accessClientSecret,
+                                serializeImportProjectPayload(finalPayload),
+                            )
+                        }
+                    }
+                    result.fold(
+                        onSuccess = { r ->
+                            importStatus = buildString {
+                                append(if (r.project_created) "Проект создан" else "Проект обновлён")
+                                append(", задач: ${r.subtasks_created}, уже было: ${r.subtasks_skipped}, записей плана: ${r.static_entries_created}")
+                                if (r.errors.isNotEmpty()) {
+                                    append(", ошибок: ${r.errors.size} (строка ${r.errors.first().row}: ${r.errors.first().message})")
+                                }
+                            }
+                            refreshToken++
+                        },
+                        onFailure = { importStatus = "Не удалось импортировать проект" },
+                    )
+                }
+            },
+        )
     }
 
     suspend fun reload() {

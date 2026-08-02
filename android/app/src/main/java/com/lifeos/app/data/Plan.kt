@@ -43,8 +43,40 @@ data class ImportProjectResult(
     val project_id: Int,
     val project_created: Boolean,
     val subtasks_created: Int,
+    val subtasks_skipped: Int = 0,
     val static_entries_created: Int,
     val errors: List<ImportRowError>,
+)
+
+/**
+ * Client-side mirror of the server's recursive `ImportSubtask` (chapter:
+ * project import review) - a checklist node in the file being reviewed
+ * before submission. Top-level entries are "Задача", nested entries at any
+ * depth are "Подзадача". Used only to parse a picked JSON file (via Gson),
+ * let [ProjectImportReviewDialog] prune rejected subtrees, and re-serialize
+ * the accepted tree back into the shape [ApiFactory.importProject] expects -
+ * never sent/received as its own API call.
+ */
+data class ImportSubtaskPayload(
+    val title: String,
+    val done: Boolean = false,
+    val subtasks: List<ImportSubtaskPayload> = emptyList(),
+)
+
+data class ImportStaticEntryPayload(
+    val date: String,
+    val start: String,
+    val end: String,
+    val name: String? = null,
+    val subtask_title: String? = null,
+)
+
+data class ImportProjectPayload(
+    val project_name: String,
+    val color: String? = null,
+    val subtasks: List<ImportSubtaskPayload> = emptyList(),
+    val static_entries: List<ImportStaticEntryPayload> = emptyList(),
+    val tz_offset_minutes: Int = 0,
 )
 
 data class ClearResult(

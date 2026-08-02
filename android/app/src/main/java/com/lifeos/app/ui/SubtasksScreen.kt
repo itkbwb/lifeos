@@ -101,7 +101,7 @@ fun SubtasksScreen(
             runCatching { ApiFactory.listSubtasks(serverUrl, accessClientId, accessClientSecret, project.id) }
         }.fold(
             onSuccess = { subtasks = it; loaded = true },
-            onFailure = { error = "Не удалось загрузить подзадачи"; loaded = true },
+            onFailure = { error = "Не удалось загрузить задачи"; loaded = true },
         )
     }
 
@@ -118,7 +118,7 @@ fun SubtasksScreen(
                 }
             }.fold(
                 onSuccess = { created -> subtasks = subtasks + created },
-                onFailure = { error = "Не удалось добавить подзадачу" },
+                onFailure = { error = "Не удалось добавить" },
             )
         }
     }
@@ -172,7 +172,7 @@ fun SubtasksScreen(
                     )
                 }
             }.onFailure {
-                error = "Не удалось переместить подзадачу"
+                error = "Не удалось переместить"
                 subtasks = previous
             }
         }
@@ -279,7 +279,7 @@ fun SubtasksScreen(
                 }
 
                 subtasks.isEmpty() -> Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("Нет подзадач", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Нет задач", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
                 else -> SubtaskTree(
@@ -307,7 +307,7 @@ fun SubtasksScreen(
                 OutlinedTextField(
                     value = newTitle,
                     onValueChange = { newTitle = it },
-                    placeholder = { Text("Новая подзадача") },
+                    placeholder = { Text("Новая задача") },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
@@ -326,22 +326,15 @@ private data class VisibleRow(val subtask: Subtask, val depth: Int, val hasChild
 /** Depth-first flattening of the subtask tree, skipping the children of any
  * id in [collapsedIds] - children of the same parent always end up
  * contiguous in the result, which [SubtaskTree]'s drag-reorder relies on to
- * detect sibling-group boundaries. */
+ * detect sibling-group boundaries. Thin wrapper around [buildVisibleRowsGeneric]
+ * - this shape (flat list + parent_id) just needs grouping-by-parent and
+ * position-sorting before the shared depth-first walk. */
 private fun buildVisibleRows(subtasks: List<Subtask>, collapsedIds: Set<Int>): List<VisibleRow> {
     val childrenByParent = subtasks.groupBy { it.parent_id }
-    val result = mutableListOf<VisibleRow>()
-    fun walk(parentId: Int?, depth: Int) {
-        val siblings = childrenByParent[parentId]?.sortedBy { it.position } ?: return
-        for (s in siblings) {
-            val hasChildren = !childrenByParent[s.id].isNullOrEmpty()
-            result.add(VisibleRow(s, depth, hasChildren))
-            if (hasChildren && s.id !in collapsedIds) {
-                walk(s.id, depth + 1)
-            }
-        }
-    }
-    walk(null, 0)
-    return result
+    fun childrenOf(s: Subtask): List<Subtask> = childrenByParent[s.id]?.sortedBy { it.position } ?: emptyList()
+    val roots = childrenByParent[null]?.sortedBy { it.position } ?: emptyList()
+    return buildVisibleRowsGeneric(roots, ::childrenOf, { it.id }, collapsedIds)
+        .map { (s, depth) -> VisibleRow(s, depth, childrenOf(s).isNotEmpty()) }
 }
 
 /**
