@@ -132,6 +132,30 @@ class ActiveProjectOut(BaseModel):
     project_id: int
     event_id: int
     started_at: datetime
+    label: Optional[str] = None
+
+
+class ReminderCreate(BaseModel):
+    remind_at: datetime
+    message: str
+
+    @field_validator("message")
+    @classmethod
+    def message_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("message must not be empty")
+        return v
+
+
+class ReminderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    remind_at: datetime
+    message: str
+    notified: bool
+    created_at: datetime
 
 
 class PlanEntryCreate(BaseModel):

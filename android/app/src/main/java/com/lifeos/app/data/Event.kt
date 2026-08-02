@@ -16,6 +16,7 @@ data class ActiveProject(
     val project_id: Int,
     val event_id: Int,
     val started_at: String,
+    val label: String? = null,
 )
 
 class ActiveProjectConflictException(

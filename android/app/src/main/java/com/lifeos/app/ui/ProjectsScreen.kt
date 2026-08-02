@@ -250,7 +250,15 @@ fun ProjectsScreen(
         scope.launch {
             withContext(Dispatchers.IO) {
                 runCatching {
-                    ApiFactory.createEvent(serverUrl, accessClientId, accessClientSecret, projectId = projectId, type = "end")
+                    // The end event must carry the same label the active session was started
+                    // with, or the calendar shows a mismatched name at start vs finish - fetch
+                    // it fresh rather than trusting cached UI state.
+                    val activeLabel = ApiFactory.getActiveProject(serverUrl, accessClientId, accessClientSecret)
+                        ?.takeIf { it.project_id == projectId }?.label
+                    ApiFactory.createEvent(
+                        serverUrl, accessClientId, accessClientSecret,
+                        projectId = projectId, type = "end", label = activeLabel,
+                    )
                 }
             }.fold(
                 onSuccess = { refreshToken++ },
@@ -568,7 +576,7 @@ fun ProjectsScreen(
                             runCatching {
                                 ApiFactory.createEvent(
                                     serverUrl, accessClientId, accessClientSecret,
-                                    projectId = state.active.project_id, type = "end",
+                                    projectId = state.active.project_id, type = "end", label = state.active.label,
                                 )
                                 ApiFactory.createEvent(
                                     serverUrl, accessClientId, accessClientSecret,

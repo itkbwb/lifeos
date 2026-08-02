@@ -462,7 +462,14 @@ def _try_close_active_session(db: Session, project_id: int) -> None:
     it silently does nothing rather than fail the whole request."""
     active = get_active_start(db)
     if active is not None and active.project_id == project_id:
-        db.add(models.Event(project_id=project_id, type="end", occurred_at=datetime.now(timezone.utc)))
+        db.add(
+            models.Event(
+                project_id=project_id,
+                type="end",
+                occurred_at=datetime.now(timezone.utc),
+                label=active.label,
+            )
+        )
 
 
 @app.post("/api/events", response_model=schemas.EventOut, status_code=201)
@@ -547,7 +554,7 @@ def get_active_project_endpoint(db: Session = Depends(get_db)):
     if active is None:
         return Response(status_code=204)
     return schemas.ActiveProjectOut(
-        project_id=active.project_id, event_id=active.id, started_at=active.occurred_at
+        project_id=active.project_id, event_id=active.id, started_at=active.occurred_at, label=active.label
     )
 
 
@@ -1065,4 +1072,36 @@ def unregister_device_token(payload: schemas.DeviceTokenRegister, db: Session = 
     """Un-registers a token (e.g. the user turned the Settings toggle off) -
     idempotent, no error if the token was never registered or already gone."""
     db.query(models.DeviceToken).filter(models.DeviceToken.token == payload.token).delete()
+    db.commit()
+
+
+@app.post("/api/reminders", response_model=schemas.ReminderOut, status_code=201)
+def create_reminder(payload: schemas.ReminderCreate, db: Session = Depends(get_db)):
+    reminder = models.Reminder(remind_at=payload.remind_at, message=payload.message)
+    db.add(reminder)
+    db.commit()
+    db.refresh(reminder)
+    return reminder
+
+
+@app.get("/api/reminders", response_model=list[schemas.ReminderOut])
+def list_reminders(
+    from_: Optional[datetime] = Query(None, alias="from"),
+    to: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.Reminder)
+    if from_ is not None:
+        query = query.filter(models.Reminder.remind_at >= from_)
+    if to is not None:
+        query = query.filter(models.Reminder.remind_at < to)
+    return query.order_by(models.Reminder.remind_at.asc()).all()
+
+
+@app.delete("/api/reminders/{reminder_id}", status_code=204)
+def delete_reminder(reminder_id: int, db: Session = Depends(get_db)):
+    reminder = db.get(models.Reminder, reminder_id)
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    db.delete(reminder)
     db.commit()

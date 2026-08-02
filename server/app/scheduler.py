@@ -93,6 +93,19 @@ def check_and_notify() -> None:
                     )
                     if sent > 0:
                         _set_state(db, "last_stop_notified_event_id", active.id)
+
+        due_reminders = (
+            db.query(models.Reminder)
+            .filter(models.Reminder.notified.is_(False), models.Reminder.remind_at <= now)
+            .all()
+        )
+        for reminder in due_reminders:
+            sent = notifications.send_push(
+                data={"type": "reminder", "reminder_id": reminder.id, "message": reminder.message},
+            )
+            if sent > 0:
+                reminder.notified = True
+                db.commit()
     except Exception:  # noqa: BLE001 - a failed tick must never kill the scheduler thread
         logger.exception("plan notification check failed")
     finally:
