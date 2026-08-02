@@ -13,13 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -29,7 +23,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,13 +45,11 @@ import com.lifeos.app.data.DynamicPlanEntry
 import com.lifeos.app.data.Event
 import com.lifeos.app.data.PlanEntry
 import com.lifeos.app.data.Project
-import com.lifeos.app.ui.StaticPlanFormDialog
 import com.lifeos.app.ui.theme.ProjectColors
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 // internal (not private) so WeekGridView can share the exact same hour-row
@@ -98,6 +89,17 @@ private fun colorFor(projects: List<Project>, projectId: Int): Color {
  * The vertical hour-by-hour grid with 10-minute subdivisions, rendering this day's
  * Timeline events (completed intervals, an at-most-one fading unfinished block, and
  * non-interactive INSTANT markers). Shared by Day scale and every page of Week's pager.
+ *
+ * Deliberately has NO scrollable Modifier of its own, and no FAB - both used to live
+ * here, but that meant every DayPager page got its own ScrollState (reset to 0 on
+ * every day-to-day swipe) and, worse, briefly had TWO pages' worth of ScrollState
+ * simultaneously alive and fighting over the same touch stream mid-swipe (Pager
+ * keeps the outgoing and incoming page both composed during the drag). That's what
+ * caused the vertical position to reset AND the pager's own page<->date sync to
+ * desync in one swipe direction. The fix: exactly one scrollable ancestor, wrapping
+ * the whole DayPager once - see CalendarScreen, which now also owns the FAB/dialog
+ * (keyed off selectedDate, not per-page date) so it stays fixed on screen instead of
+ * scrolling away with the content.
  */
 @Composable
 fun DayTimelineView(
@@ -107,20 +109,14 @@ fun DayTimelineView(
     accessClientId: String,
     accessClientSecret: String,
     onTapInterval: (Event) -> Unit = {},
-    // Hoisted by the caller (one instance shared across every day DayPager
-    // swipes through) so scrolling partway down a day and swiping to the
-    // next one keeps that same vertical position, instead of each day's page
-    // getting its own ScrollState reset to 0 - see DayPager/CalendarScreen.
-    scrollState: ScrollState = rememberScrollState(),
+    // Bumped by the caller after a new Static entry is saved via its own
+    // FAB/dialog, to force this day's plan entries to re-fetch.
+    planRefreshKey: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     var events by remember { mutableStateOf<List<Event>>(emptyList()) }
     var staticPlanEntries by remember { mutableStateOf<List<PlanEntry>>(emptyList()) }
     var dynamicPlanEntries by remember { mutableStateOf<List<DynamicPlanEntry>>(emptyList()) }
-    var planRefreshKey by remember { mutableStateOf(0) }
-    var showPlanDialog by remember { mutableStateOf(false) }
-    var planErrorMessage by remember { mutableStateOf("") }
-    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(date, serverUrl) {
         val zone = ZoneId.systemDefault()
@@ -157,65 +153,14 @@ fun DayTimelineView(
     }
     val eventsById = remember(events) { events.associateBy { it.id } }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        DayTimelineContent(
-            date = date,
-            renderItems = renderItems,
-            projects = projects,
-            eventsById = eventsById,
-            onTapInterval = onTapInterval,
-            scrollState = scrollState,
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        FloatingActionButton(
-            onClick = { showPlanDialog = true },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-        ) {
-            Icon(Icons.Filled.Add, contentDescription = "Запланировать")
-        }
-    }
-
-    if (showPlanDialog) {
-        StaticPlanFormDialog(
-            projects = projects,
-            errorMessage = planErrorMessage,
-            serverUrl = serverUrl,
-            accessClientId = accessClientId,
-            accessClientSecret = accessClientSecret,
-            onDismiss = {
-                showPlanDialog = false
-                planErrorMessage = ""
-            },
-            onConfirm = { projectId, startTime, endTime, name, subtaskId ->
-                val zone = ZoneId.systemDefault()
-                val startInstant = date.atTime(startTime).atZone(zone).toInstant().toString()
-                val endInstant = date.atTime(endTime).atZone(zone).toInstant().toString()
-                coroutineScope.launch {
-                    withContext(Dispatchers.IO) {
-                        runCatching {
-                            ApiFactory.createPlanEntry(
-                                serverUrl,
-                                accessClientId,
-                                accessClientSecret,
-                                projectId = projectId,
-                                startTime = startInstant,
-                                endTime = endInstant,
-                                name = name,
-                                subtaskId = subtaskId,
-                            )
-                        }
-                    }.onSuccess {
-                        showPlanDialog = false
-                        planErrorMessage = ""
-                        planRefreshKey++
-                    }.onFailure {
-                        planErrorMessage = "Не удалось сохранить план"
-                    }
-                }
-            },
-        )
-    }
+    DayTimelineContent(
+        date = date,
+        renderItems = renderItems,
+        projects = projects,
+        eventsById = eventsById,
+        onTapInterval = onTapInterval,
+        modifier = modifier,
+    )
 }
 
 /**
@@ -230,10 +175,9 @@ internal fun DayTimelineContent(
     projects: List<Project>,
     eventsById: Map<Int, Event>,
     onTapInterval: (Event) -> Unit = {},
-    scrollState: ScrollState = rememberScrollState(),
     modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(modifier = modifier.verticalScroll(scrollState)) {
+    BoxWithConstraints(modifier = modifier) {
         val contentWidth = maxWidth - CONTENT_START_DP.dp - CONTENT_END_DP.dp
 
         Column(modifier = Modifier.fillMaxWidth()) {

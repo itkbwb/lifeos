@@ -11,9 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -99,10 +97,6 @@ fun DayEventListView(
     serverUrl: String,
     accessClientId: String,
     accessClientSecret: String,
-    // Hoisted by the caller (one instance shared across every day DayPager
-    // swipes through) so the list's scroll position carries over day-to-day,
-    // same reasoning as DayTimelineView's scrollState - see CalendarScreen.
-    listState: LazyListState = rememberLazyListState(),
     modifier: Modifier = Modifier,
 ) {
     var events by remember { mutableStateOf<List<Event>>(emptyList()) }
@@ -134,7 +128,7 @@ fun DayEventListView(
         return
     }
 
-    LazyColumn(state = listState, modifier = modifier.fillMaxSize()) {
+    LazyColumn(modifier = modifier.fillMaxSize()) {
         items(rows, key = { "${it::class.simpleName}-${it.key()}" }) { row ->
             DayEventRowView(row, projects)
             HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))

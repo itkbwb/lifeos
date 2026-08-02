@@ -15,7 +15,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -127,10 +129,15 @@ fun MonthView(
         pageCount = { MONTH_PAGE_COUNT },
     )
 
+    // Same stale-closure trap as DayPager (see its doc comment): this effect's
+    // keys never change, so it runs once and never restarts.
+    val currentSelectedYearMonth by rememberUpdatedState(selectedYearMonth)
+    val currentOnYearMonthChange by rememberUpdatedState(onYearMonthChange)
+
     LaunchedEffect(pagerState, baseYearMonth) {
         snapshotFlow { pagerState.currentPage }.collect { page ->
             val ym = monthPageToYearMonth(baseYearMonth, page)
-            if (ym != selectedYearMonth) onYearMonthChange(ym)
+            if (ym != currentSelectedYearMonth) currentOnYearMonthChange(ym)
         }
     }
 

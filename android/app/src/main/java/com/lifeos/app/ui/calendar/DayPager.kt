@@ -1,17 +1,15 @@
 package com.lifeos.app.ui.calendar
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalViewConfiguration
-import androidx.compose.ui.platform.ViewConfiguration
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
@@ -39,10 +37,23 @@ fun DayPager(
         pageCount = { DAY_PAGE_COUNT },
     )
 
+    // This effect's keys (pagerState, baseDate) never change across the pager's
+    // lifetime, so Compose starts it exactly once and never restarts it -
+    // reading `selectedDate`/`onSelectDate` directly here would freeze them at
+    // whatever they were on that first composition (a classic stale-closure
+    // bug): every subsequent page change would keep comparing against that
+    // FIRST selectedDate forever, never the current one. Concretely, that made
+    // the page landing back on "today" (selectedDate's initial value) silently
+    // fail to update the header, in only one swipe direction, no matter how
+    // long the pager had been in use - rememberUpdatedState keeps this
+    // effect's view of both always current without needing to restart it.
+    val currentSelectedDate by rememberUpdatedState(selectedDate)
+    val currentOnSelectDate by rememberUpdatedState(onSelectDate)
+
     LaunchedEffect(pagerState, baseDate) {
         snapshotFlow { pagerState.currentPage }.collect { page ->
             val date = baseDate.plusDays((page - DAY_PAGE_CENTER).toLong())
-            if (date != selectedDate) onSelectDate(date)
+            if (date != currentSelectedDate) currentOnSelectDate(date)
         }
     }
 
@@ -51,29 +62,15 @@ fun DayPager(
         if (targetPage != pagerState.currentPage) pagerState.scrollToPage(targetPage)
     }
 
-    // A real finger's "vertical" drag is never perfectly straight - a diagonal
-    // component during the first few pixels can make the Pager's own
-    // horizontal-orientation touch-slop check win the ambiguous gesture before
-    // the page content's verticalScroll gets a chance, "eating" slow vertical
-    // drags (only a hard flick has enough single-axis velocity to reliably
-    // tip the race the other way). Raising ONLY the Pager's touch slop makes
-    // it require a much more clearly-horizontal gesture before it claims a
-    // drag as a page-swipe, without touching the inner verticalScroll's own
-    // (normal) slop - restored via a second CompositionLocalProvider around
-    // the actual page content, which sits inside this one.
-    val originalViewConfiguration = LocalViewConfiguration.current
-    val pagerViewConfiguration = remember(originalViewConfiguration) {
-        object : ViewConfiguration by originalViewConfiguration {
-            override val touchSlop: Float = originalViewConfiguration.touchSlop * 3f
-        }
-    }
-
-    CompositionLocalProvider(LocalViewConfiguration provides pagerViewConfiguration) {
-        HorizontalPager(state = pagerState, modifier = modifier.fillMaxSize()) { page ->
-            CompositionLocalProvider(LocalViewConfiguration provides originalViewConfiguration) {
-                val date = baseDate.plusDays((page - DAY_PAGE_CENTER).toLong())
-                content(date)
-            }
-        }
+    // No touch-slop tweaking needed here (previously required when the page
+    // content had its own verticalScroll competing with this horizontal
+    // Pager for the same touch stream, at the same tree depth) - the caller
+    // now wraps this whole pager in a single ancestor verticalScroll instead
+    // of putting one inside each page, and Compose's nested-scroll dispatch
+    // already disambiguates cleanly between two DIFFERENT-orientation
+    // scrollables at different tree depths, no slop hack required.
+    HorizontalPager(state = pagerState, modifier = modifier) { page ->
+        val date = baseDate.plusDays((page - DAY_PAGE_CENTER).toLong())
+        content(date)
     }
 }

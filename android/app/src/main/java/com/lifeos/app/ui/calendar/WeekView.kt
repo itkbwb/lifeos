@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -87,13 +88,22 @@ fun WeekView(
         pageCount = { WEEK_PAGE_COUNT },
     )
 
+    // Same stale-closure trap as DayPager (see its doc comment): this effect's
+    // keys never change, so it runs once and never restarts - reading
+    // selectedWeekStart/selectedDate/onSelectDate directly would freeze them
+    // at their very first values forever, making the pager silently fail to
+    // report landing back on that first week in one swipe direction.
+    val currentSelectedWeekStart by rememberUpdatedState(selectedWeekStart)
+    val currentSelectedDate by rememberUpdatedState(selectedDate)
+    val currentOnSelectDate by rememberUpdatedState(onSelectDate)
+
     LaunchedEffect(pagerState, baseWeekStart) {
         snapshotFlow { pagerState.currentPage }.collect { page ->
             val pageWeekStart = baseWeekStart.plusWeeks((page - WEEK_PAGE_CENTER).toLong())
-            if (pageWeekStart != selectedWeekStart) {
+            if (pageWeekStart != currentSelectedWeekStart) {
                 // Preserve which weekday was selected, not just "Monday of the new week".
-                val weekdayOffset = ChronoUnit.DAYS.between(selectedWeekStart, selectedDate)
-                onSelectDate(pageWeekStart.plusDays(weekdayOffset))
+                val weekdayOffset = ChronoUnit.DAYS.between(currentSelectedWeekStart, currentSelectedDate)
+                currentOnSelectDate(pageWeekStart.plusDays(weekdayOffset))
             }
         }
     }
