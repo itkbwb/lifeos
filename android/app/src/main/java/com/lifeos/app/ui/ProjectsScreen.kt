@@ -19,10 +19,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -97,9 +99,30 @@ fun ProjectsScreen(
     var showArchived by remember { mutableStateOf(false) }
     var openSubtasksFor by remember { mutableStateOf<Project?>(null) }
     var importStatus by remember { mutableStateOf("") }
+    var showArchiveAllConfirm by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    fun archiveAllActive() {
+        val toArchive = projects.filter { !it.archived }
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                // Best-effort per project, mirroring the per-project archive
+                // toggle already used elsewhere - one failure shouldn't stop
+                // the rest from archiving.
+                toArchive.forEach { project ->
+                    runCatching {
+                        ApiFactory.updateProject(
+                            serverUrl, accessClientId, accessClientSecret,
+                            id = project.id, archived = true,
+                        )
+                    }
+                }
+            }
+            refreshToken++
+        }
+    }
 
     // Whole-project import (chapter: project import review) - a self-contained
     // JSON file (project + a nested checklist tree + optionally Static entries)
@@ -265,7 +288,16 @@ fun ProjectsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Проекты") })
+            TopAppBar(
+                title = { Text("Проекты") },
+                actions = {
+                    if (projects.any { !it.archived }) {
+                        IconButton(onClick = { showArchiveAllConfirm = true }) {
+                            Icon(Icons.Filled.Archive, contentDescription = "Архивировать все проекты")
+                        }
+                    }
+                },
+            )
         },
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -382,6 +414,23 @@ fun ProjectsScreen(
                 }
             }
         }
+    }
+
+    if (showArchiveAllConfirm) {
+        val count = projects.count { !it.archived }
+        AlertDialog(
+            onDismissRequest = { showArchiveAllConfirm = false },
+            text = { Text("Архивировать все активные проекты ($count)? Их можно будет восстановить по одному из архива.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showArchiveAllConfirm = false
+                    archiveAllActive()
+                }) { Text("Архивировать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showArchiveAllConfirm = false }) { Text("Отмена") }
+            },
+        )
     }
 
     when (val state = dialogState) {
