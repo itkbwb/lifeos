@@ -25,3 +25,8 @@ class ActiveProjectConflictException(
 ) : Exception("another project is already active")
 
 class ProjectHasRecordsException : Exception("project has events or plan entries; cannot delete without force")
+
+class ProjectNameConflictException(
+    val conflictingProjectId: Int,
+    val conflictingProjectName: String,
+) : Exception("an active project with this name already exists")

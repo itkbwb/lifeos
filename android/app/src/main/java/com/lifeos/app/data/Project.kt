@@ -8,3 +8,10 @@ data class Project(
     val archived: Boolean = false,
     val notes: String? = null,
 )
+
+data class ProjectMergeResult(
+    val target_project_id: Int,
+    val subtasks_moved: Int,
+    val events_moved: Int,
+    val plan_entries_moved: Int,
+)

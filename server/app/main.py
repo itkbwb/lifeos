@@ -61,6 +61,34 @@ def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session 
     project = db.get(models.Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Active project names must stay collision-free (archived ones may repeat
+    # freely - they're dormant). This one rule covers both "restore an
+    # archived project" and "rename an already-active project" ending up
+    # active with a name another active project already has - update_project
+    # already treats name/archived as independent fields of one flat update,
+    # so there's no separate "restore path" to special-case.
+    if payload.archived is not None and payload.archived is False:
+        final_name = payload.name if payload.name is not None else project.name
+        conflict = (
+            db.query(models.Project)
+            .filter(
+                models.Project.id != project_id,
+                models.Project.name == final_name,
+                models.Project.archived == False,  # noqa: E712
+            )
+            .first()
+        )
+        if conflict is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "an active project with this name already exists",
+                    "conflicting_project_id": conflict.id,
+                    "conflicting_project_name": conflict.name,
+                },
+            )
+
     if payload.name is not None:
         project.name = payload.name
     if payload.color is not None:
@@ -102,6 +130,74 @@ def delete_project(project_id: int, force: bool = False, db: Session = Depends(g
         raise HTTPException(status_code=409, detail="project has events; cannot delete")
 
 
+@app.post("/api/projects/merge", response_model=schemas.ProjectMergeResult)
+def merge_projects(payload: schemas.ProjectMergeRequest, db: Session = Depends(get_db)):
+    """Folds `source_id` entirely into `target_id` - every Subtask/Event/
+    PlanEntry gets reassigned (no dedup by title, a deliberately simple
+    "just move everything" merge - see chapter: archive name-collision
+    resolution), then the now-empty source project is deleted. General-
+    purpose - doesn't care whether either project is archived, that's a
+    concern of whichever UI flow calls this (e.g. restoring an archived
+    project into an active one with the same name)."""
+    if payload.source_id == payload.target_id:
+        raise HTTPException(status_code=422, detail="source_id and target_id must differ")
+    source = db.get(models.Project, payload.source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source project not found")
+    target = db.get(models.Project, payload.target_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="target project not found")
+
+    # Root-level subtasks collide on `position` once reassigned (both trees
+    # independently start counting from 0) - append source's root group
+    # after target's, same "seed from max, increment" pattern create_subtask
+    # already uses for one sibling group. Nested subtasks don't need this:
+    # their sibling-group identity is their parent's id, which is untouched
+    # by this reassignment.
+    last_root_position = (
+        db.query(models.Subtask)
+        .filter(models.Subtask.project_id == payload.target_id, models.Subtask.parent_id.is_(None))
+        .order_by(models.Subtask.position.desc())
+        .first()
+    )
+    next_root_position = (last_root_position.position + 1) if last_root_position else 0
+
+    source_subtasks = (
+        db.query(models.Subtask)
+        .filter(models.Subtask.project_id == payload.source_id)
+        .order_by(models.Subtask.position.asc())
+        .all()
+    )
+    subtasks_moved = 0
+    for subtask in source_subtasks:
+        subtask.project_id = payload.target_id
+        if subtask.parent_id is None:
+            subtask.position = next_root_position
+            next_root_position += 1
+        subtasks_moved += 1
+
+    events_moved = (
+        db.query(models.Event)
+        .filter(models.Event.project_id == payload.source_id)
+        .update({models.Event.project_id: payload.target_id}, synchronize_session=False)
+    )
+    plan_entries_moved = (
+        db.query(models.PlanEntry)
+        .filter(models.PlanEntry.project_id == payload.source_id)
+        .update({models.PlanEntry.project_id: payload.target_id}, synchronize_session=False)
+    )
+
+    db.delete(source)
+    db.commit()
+
+    return schemas.ProjectMergeResult(
+        target_project_id=payload.target_id,
+        subtasks_moved=subtasks_moved,
+        events_moved=events_moved,
+        plan_entries_moved=plan_entries_moved,
+    )
+
+
 @app.get("/api/projects/{project_id}/subtasks", response_model=list[schemas.SubtaskOut])
 def list_subtasks(project_id: int, db: Session = Depends(get_db)):
     if db.get(models.Project, project_id) is None:
@@ -139,6 +235,7 @@ def create_subtask(payload: schemas.SubtaskCreate, db: Session = Depends(get_db)
         parent_id=payload.parent_id,
         title=payload.title,
         position=(last.position + 1) if last else 0,
+        is_checklist=payload.is_checklist,
     )
     db.add(subtask)
     db.commit()
@@ -154,7 +251,69 @@ def update_subtask(subtask_id: int, payload: schemas.SubtaskUpdate, db: Session 
     if payload.title is not None:
         subtask.title = payload.title
     if payload.done is not None:
-        subtask.done = payload.done
+        parent = db.get(models.Subtask, subtask.parent_id) if subtask.parent_id is not None else None
+        is_checklist_item = parent is not None and parent.is_checklist
+        if is_checklist_item and payload.done and not subtask.done:
+            # Checking a checklist item (chapter: checklist entity) - fires an
+            # Instant event for this item, and if it's the first item checked
+            # in this checklist, also a `start` for the checklist's project
+            # (same conflict rule as the "Начать" button - only one project
+            # can be active system-wide, so this can 409 the same way).
+            siblings_done = [
+                s.done
+                for s in db.query(models.Subtask)
+                .filter(models.Subtask.parent_id == subtask.parent_id, models.Subtask.id != subtask.id)
+                .all()
+            ]
+            was_first_check = not any(siblings_done)
+            if was_first_check:
+                active = get_active_start(db)
+                if active is not None and active.project_id != subtask.project_id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "message": "another project is already active",
+                            "active_project_id": active.project_id,
+                            "active_event_id": active.id,
+                            "started_at": active.occurred_at.isoformat(),
+                        },
+                    )
+            instant = models.Event(
+                project_id=subtask.project_id,
+                type="instant",
+                occurred_at=datetime.now(timezone.utc),
+                label=subtask.title,
+            )
+            db.add(instant)
+            db.flush()
+            subtask.instant_event_id = instant.id
+            if was_first_check:
+                db.add(
+                    models.Event(
+                        project_id=subtask.project_id,
+                        type="start",
+                        occurred_at=datetime.now(timezone.utc),
+                        label=parent.title,
+                    )
+                )
+            subtask.done = True
+            if all(siblings_done):  # all([]) is True - a single-item checklist counts as complete
+                # This was the last unchecked item - the whole checklist is
+                # now fully checked. Best-effort close (see
+                # _try_close_active_session): never blocks this request.
+                _try_close_active_session(db, subtask.project_id)
+        elif is_checklist_item and not payload.done and subtask.done:
+            # Unchecking - deletes this item's own Instant, no start/stop
+            # side effects (deliberately doesn't "reopen" a session if this
+            # makes a previously-fully-checked list incomplete again).
+            if subtask.instant_event_id is not None:
+                db.query(models.Event).filter(models.Event.id == subtask.instant_event_id).delete(
+                    synchronize_session=False
+                )
+                subtask.instant_event_id = None
+            subtask.done = False
+        else:
+            subtask.done = payload.done
     if payload.notes is not None:
         subtask.notes = payload.notes
     if "parent_id" in payload.model_fields_set:
@@ -202,6 +361,32 @@ def delete_subtask(subtask_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Subtask not found")
     db.delete(subtask)
     db.commit()
+
+
+@app.post("/api/subtasks/{subtask_id}/checklist-reset", response_model=list[schemas.SubtaskOut])
+def checklist_reset(subtask_id: int, db: Session = Depends(get_db)):
+    """The "Завершить" action (chapter: checklist entity) - unchecks every
+    checked item WITHOUT deleting their Instant events (those stay in the
+    calendar as history), then best-effort closes the checklist's project
+    session the same way the last checkbox would."""
+    container = db.get(models.Subtask, subtask_id)
+    if container is None:
+        raise HTTPException(status_code=404, detail="Subtask not found")
+    if not container.is_checklist:
+        raise HTTPException(status_code=422, detail="subtask is not a checklist")
+
+    children = db.query(models.Subtask).filter(models.Subtask.parent_id == subtask_id).all()
+    for child in children:
+        if child.done:
+            child.done = False
+            child.instant_event_id = None
+
+    _try_close_active_session(db, container.project_id)
+
+    db.commit()
+    for child in children:
+        db.refresh(child)
+    return sorted(children, key=lambda s: s.position)
 
 
 @app.post("/api/projects/{project_id}/subtasks/reorder", response_model=list[schemas.SubtaskOut])
@@ -267,6 +452,17 @@ def get_active_start(db: Session, exclude_event_id: Optional[int] = None) -> Opt
     # Only one project should ever be open at once; if more somehow are, the
     # most recently started one wins.
     return max(open_starts.values(), key=lambda e: e.occurred_at)
+
+
+def _try_close_active_session(db: Session, project_id: int) -> None:
+    """Best-effort stop - used by checklist auto-close (last checkbox checked,
+    or the checklist-reset "Завершить" action). Unlike a manual end via
+    POST /api/events, this never raises: if there's no matching open session
+    for this project right now (e.g. it was already ended some other way),
+    it silently does nothing rather than fail the whole request."""
+    active = get_active_start(db)
+    if active is not None and active.project_id == project_id:
+        db.add(models.Event(project_id=project_id, type="end", occurred_at=datetime.now(timezone.utc)))
 
 
 @app.post("/api/events", response_model=schemas.EventOut, status_code=201)
@@ -688,7 +884,15 @@ def import_project(payload: schemas.ImportProjectRequest, db: Session = Depends(
     entry a Static entry lands on is not guaranteed by position."""
     tz = timezone(timedelta(minutes=payload.tz_offset_minutes))
 
-    project = db.query(models.Project).filter(models.Project.name == payload.project_name).first()
+    # Only matches an ACTIVE project by name - an archived project sharing
+    # this name is deliberately ignored (chapter: archive name-collision
+    # resolution), so importing never silently reactivates/reuses something
+    # sitting in the archive; a fresh active project is created instead.
+    project = (
+        db.query(models.Project)
+        .filter(models.Project.name == payload.project_name, models.Project.archived == False)  # noqa: E712
+        .first()
+    )
     project_created = False
     if project is None:
         color = payload.color or _IMPORT_COLORS[db.query(models.Project).count() % len(_IMPORT_COLORS)]

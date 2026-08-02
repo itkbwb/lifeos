@@ -62,6 +62,7 @@ import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.ImportProjectPayload
 import com.lifeos.app.data.Project
 import com.lifeos.app.data.ProjectHasRecordsException
+import com.lifeos.app.data.ProjectNameConflictException
 import com.lifeos.app.data.Subtask
 import com.lifeos.app.ui.theme.ProjectColors
 import java.time.ZonedDateTime
@@ -80,6 +81,8 @@ private sealed class DialogState {
     data class StartPrompt(val project: Project) : DialogState()
     data class InstantPrompt(val project: Project) : DialogState()
     data class StartConflict(val newProject: Project, val name: String, val active: ActiveProject) : DialogState()
+    data class RestoreConflict(val archived: Project, val conflictingProjectId: Int, val conflictingProjectName: String) :
+        DialogState()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -256,6 +259,31 @@ fun ProjectsScreen(
         }
     }
 
+    fun restoreProject(project: Project) {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    ApiFactory.updateProject(
+                        serverUrl, accessClientId, accessClientSecret,
+                        id = project.id, archived = false,
+                    )
+                }
+            }.fold(
+                onSuccess = {
+                    dialogState = DialogState.None
+                    refreshToken++
+                },
+                onFailure = { e ->
+                    if (e is ProjectNameConflictException) {
+                        dialogState = DialogState.RestoreConflict(project, e.conflictingProjectId, e.conflictingProjectName)
+                    } else {
+                        dialogError = "Не удалось восстановить проект"
+                    }
+                },
+            )
+        }
+    }
+
     fun logInstant(project: Project, name: String) {
         scope.launch {
             withContext(Dispatchers.IO) {
@@ -395,18 +423,7 @@ fun ProjectsScreen(
                                         dialogError = ""
                                         dialogState = DialogState.Edit(project)
                                     },
-                                    onRestore = {
-                                        scope.launch {
-                                            withContext(Dispatchers.IO) {
-                                                runCatching {
-                                                    ApiFactory.updateProject(
-                                                        serverUrl, accessClientId, accessClientSecret,
-                                                        id = project.id, archived = false,
-                                                    )
-                                                }
-                                            }.onSuccess { refreshToken++ }
-                                        }
-                                    },
+                                    onRestore = { restoreProject(project) },
                                 )
                             }
                         }
@@ -492,21 +509,25 @@ fun ProjectsScreen(
             onRequestDelete = { dialogState = DialogState.ConfirmDelete(state.project) },
             onToggleArchive = {
                 val target = state.project
-                scope.launch {
-                    withContext(Dispatchers.IO) {
-                        runCatching {
-                            ApiFactory.updateProject(
-                                serverUrl, accessClientId, accessClientSecret,
-                                id = target.id, archived = !target.archived,
-                            )
-                        }
-                    }.fold(
-                        onSuccess = {
-                            dialogState = DialogState.None
-                            refreshToken++
-                        },
-                        onFailure = { dialogError = "Не удалось изменить статус архива" },
-                    )
+                if (target.archived) {
+                    restoreProject(target)
+                } else {
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                ApiFactory.updateProject(
+                                    serverUrl, accessClientId, accessClientSecret,
+                                    id = target.id, archived = true,
+                                )
+                            }
+                        }.fold(
+                            onSuccess = {
+                                dialogState = DialogState.None
+                                refreshToken++
+                            },
+                            onFailure = { dialogError = "Не удалось изменить статус архива" },
+                        )
+                    }
                 }
             },
         )
@@ -562,6 +583,77 @@ fun ProjectsScreen(
                 },
             )
         }
+
+        is DialogState.RestoreConflict -> RestoreConflictDialog(
+            archivedProjectName = state.archived.name,
+            conflictingProjectName = state.conflictingProjectName,
+            onCancel = { dialogState = DialogState.None },
+            onRename = { newName ->
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.updateProject(
+                                serverUrl, accessClientId, accessClientSecret,
+                                id = state.archived.id, name = newName, archived = false,
+                            )
+                        }
+                    }.fold(
+                        onSuccess = {
+                            dialogState = DialogState.None
+                            refreshToken++
+                        },
+                        onFailure = { e ->
+                            if (e is ProjectNameConflictException) {
+                                dialogState = DialogState.RestoreConflict(state.archived, e.conflictingProjectId, e.conflictingProjectName)
+                            } else {
+                                dialogError = "Не удалось восстановить проект"
+                                dialogState = DialogState.None
+                            }
+                        },
+                    )
+                }
+            },
+            onMerge = {
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.mergeProjects(
+                                serverUrl, accessClientId, accessClientSecret,
+                                sourceId = state.archived.id, targetId = state.conflictingProjectId,
+                            )
+                        }
+                    }.fold(
+                        onSuccess = {
+                            dialogState = DialogState.None
+                            refreshToken++
+                        },
+                        onFailure = { dialogError = "Не удалось объединить проекты" },
+                    )
+                }
+            },
+            onReplace = {
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.updateProject(
+                                serverUrl, accessClientId, accessClientSecret,
+                                id = state.conflictingProjectId, archived = true,
+                            )
+                            ApiFactory.updateProject(
+                                serverUrl, accessClientId, accessClientSecret,
+                                id = state.archived.id, archived = false,
+                            )
+                        }
+                    }.fold(
+                        onSuccess = {
+                            dialogState = DialogState.None
+                            refreshToken++
+                        },
+                        onFailure = { dialogError = "Не удалось заменить проект" },
+                    )
+                }
+            },
+        )
 
         is DialogState.ConfirmDelete -> DeleteProjectConfirmDialog(
             projectName = state.project.name,

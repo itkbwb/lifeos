@@ -66,6 +66,21 @@ class ProjectOut(BaseModel):
     notes: Optional[str]
 
 
+class ProjectMergeRequest(BaseModel):
+    """Folds `source_id` into `target_id` (chapter: archive name-collision
+    resolution) - see `merge_projects` for exactly what gets reassigned."""
+
+    source_id: int
+    target_id: int
+
+
+class ProjectMergeResult(BaseModel):
+    target_project_id: int
+    subtasks_moved: int
+    events_moved: int
+    plan_entries_moved: int
+
+
 EVENT_TYPES = {"start", "end", "instant"}
 
 
@@ -347,6 +362,7 @@ class SubtaskCreate(BaseModel):
     project_id: int
     title: str
     parent_id: Optional[int] = None
+    is_checklist: bool = False
 
     @field_validator("title")
     @classmethod
@@ -389,6 +405,8 @@ class SubtaskOut(BaseModel):
     done: bool
     position: int
     notes: Optional[str]
+    is_checklist: bool
+    instant_event_id: Optional[int]
     created_at: datetime
 
 

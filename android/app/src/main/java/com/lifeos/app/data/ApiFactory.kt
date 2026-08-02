@@ -102,11 +102,41 @@ object ApiFactory {
             .patch(json.toRequestBody(jsonMediaType))
         addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
         client.newCall(requestBuilder.build()).execute().use { response ->
+            val body = response.body?.string()
+            if (response.code == 409) {
+                throw parseProjectNameConflict(body) ?: IOException("updateProject conflict: HTTP 409")
+            }
             if (!response.isSuccessful) {
                 throw IOException("updateProject failed: HTTP ${response.code}")
             }
-            val body = response.body?.string() ?: throw IOException("updateProject: empty response body")
-            return gson.fromJson(body, Project::class.java)
+            return gson.fromJson(body ?: throw IOException("updateProject: empty response body"), Project::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. Folds
+     * `sourceId`'s subtasks/events/plan entries into `targetId` and deletes `sourceId`
+     * (chapter: archive restore name-collision resolution - the "merge" choice). */
+    fun mergeProjects(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        sourceId: Int,
+        targetId: Int,
+    ): ProjectMergeResult {
+        val json = gson.toJson(mapOf("source_id" to sourceId, "target_id" to targetId))
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/projects/merge")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            val body = response.body?.string()
+            if (!response.isSuccessful) {
+                throw IOException("mergeProjects failed: HTTP ${response.code} $body")
+            }
+            return gson.fromJson(
+                body ?: throw IOException("mergeProjects: empty response body"),
+                ProjectMergeResult::class.java,
+            )
         }
     }
 
@@ -589,9 +619,11 @@ object ApiFactory {
         projectId: Int,
         title: String,
         parentId: Int? = null,
+        isChecklist: Boolean = false,
     ): Subtask {
         val fields = mutableMapOf<String, Any>("project_id" to projectId, "title" to title)
         parentId?.let { fields["parent_id"] = it }
+        if (isChecklist) fields["is_checklist"] = true
         val json = gson.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/subtasks")
@@ -632,11 +664,37 @@ object ApiFactory {
             .patch(json.toRequestBody(jsonMediaType))
         addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
         client.newCall(requestBuilder.build()).execute().use { response ->
+            val body = response.body?.string()
+            if (response.code == 409) {
+                throw parseActiveConflict(body) ?: IOException("updateSubtask conflict: HTTP 409")
+            }
             if (!response.isSuccessful) {
                 throw IOException("updateSubtask failed: HTTP ${response.code}")
             }
-            val body = response.body?.string() ?: throw IOException("updateSubtask: empty response body")
-            return gson.fromJson(body, Subtask::class.java)
+            return gson.fromJson(body ?: throw IOException("updateSubtask: empty response body"), Subtask::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. Resets
+     * every checked direct child of an is_checklist subtask back to unchecked WITHOUT deleting
+     * their Instant events (chapter: checklist entity - the "Завершить" button). */
+    fun checklistReset(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        id: Int,
+    ): List<Subtask> {
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/subtasks/$id/checklist-reset")
+            .post("".toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("checklistReset failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("checklistReset: empty response body")
+            val type = object : TypeToken<List<Subtask>>() {}.type
+            return gson.fromJson(body, type)
         }
     }
 
@@ -692,6 +750,17 @@ object ApiFactory {
                 activeProjectId = detail.get("active_project_id").asInt,
                 activeEventId = detail.get("active_event_id").asInt,
                 startedAt = detail.get("started_at").asString,
+            )
+        }.getOrNull()
+    }
+
+    private fun parseProjectNameConflict(body: String?): ProjectNameConflictException? {
+        if (body == null) return null
+        return runCatching {
+            val detail = gson.fromJson(body, JsonObject::class.java).getAsJsonObject("detail")
+            ProjectNameConflictException(
+                conflictingProjectId = detail.get("conflicting_project_id").asInt,
+                conflictingProjectName = detail.get("conflicting_project_name").asString,
             )
         }.getOrNull()
     }

@@ -300,6 +300,100 @@ fun DeleteProjectConfirmDialog(
     )
 }
 
+private sealed class RestoreConflictStep {
+    object Choose : RestoreConflictStep()
+    object Rename : RestoreConflictStep()
+    object ConfirmMerge : RestoreConflictStep()
+    object ConfirmReplace : RestoreConflictStep()
+}
+
+/**
+ * Shown when restoring an archived project fails because an active project
+ * already has that name ([com.lifeos.app.data.ProjectNameConflictException])
+ * - a small internal wizard (not three separate dialogs the caller juggles)
+ * offering rename / merge / replace, per chapter: archive restore collision.
+ */
+@Composable
+fun RestoreConflictDialog(
+    archivedProjectName: String,
+    conflictingProjectName: String,
+    onCancel: () -> Unit,
+    onRename: (newName: String) -> Unit,
+    onMerge: () -> Unit,
+    onReplace: () -> Unit,
+) {
+    var step by remember { mutableStateOf<RestoreConflictStep>(RestoreConflictStep.Choose) }
+
+    when (step) {
+        RestoreConflictStep.Choose -> AlertDialog(
+            onDismissRequest = onCancel,
+            title = { Text("Уже есть активный «$conflictingProjectName»") },
+            text = { Text("Нельзя восстановить «$archivedProjectName» под этим именем, пока есть активный проект с таким же названием.") },
+            confirmButton = {
+                TextButton(onClick = { step = RestoreConflictStep.Rename }) { Text("Переименовать") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { step = RestoreConflictStep.ConfirmMerge }) { Text("Объединить") }
+                    TextButton(onClick = { step = RestoreConflictStep.ConfirmReplace }) { Text("Заменить") }
+                    TextButton(onClick = onCancel) { Text("Отмена") }
+                }
+            },
+        )
+
+        RestoreConflictStep.Rename -> {
+            var name by remember { mutableStateOf(archivedProjectName) }
+            AlertDialog(
+                onDismissRequest = onCancel,
+                title = { Text("Новое имя") },
+                text = {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Название") },
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { onRename(name) },
+                        enabled = name.isNotBlank() && name != conflictingProjectName,
+                    ) { Text("Восстановить") }
+                },
+                dismissButton = {
+                    TextButton(onClick = onCancel) { Text("Отмена") }
+                },
+            )
+        }
+
+        RestoreConflictStep.ConfirmMerge -> AlertDialog(
+            onDismissRequest = onCancel,
+            title = { Text("Объединить с «$conflictingProjectName»?") },
+            text = { Text("Все задачи и события «$archivedProjectName» перейдут в «$conflictingProjectName». Архивный проект «$archivedProjectName» исчезнет.") },
+            confirmButton = {
+                TextButton(onClick = onMerge) { Text("Объединить") }
+            },
+            dismissButton = {
+                TextButton(onClick = onCancel) { Text("Отмена") }
+            },
+        )
+
+        RestoreConflictStep.ConfirmReplace -> AlertDialog(
+            onDismissRequest = onCancel,
+            title = { Text("Заменить «$conflictingProjectName»?") },
+            text = { Text("«$conflictingProjectName» будет заархивирован, а «$archivedProjectName» восстановлен под тем же именем.") },
+            confirmButton = {
+                TextButton(onClick = onReplace) {
+                    Text("Заменить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onCancel) { Text("Отмена") }
+            },
+        )
+    }
+}
+
 /**
  * Shown when deleting a project fails because it has Events or Plan entries
  * ([com.lifeos.app.data.ProjectHasRecordsException]) - offers archiving

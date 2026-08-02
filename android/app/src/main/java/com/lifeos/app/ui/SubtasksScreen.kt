@@ -1,5 +1,6 @@
 package com.lifeos.app.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandLess
@@ -93,7 +95,9 @@ fun SubtasksScreen(
     var error by remember { mutableStateOf("") }
     var collapsedIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var addingChildTo by remember { mutableStateOf<Subtask?>(null) }
+    var addingChecklistChildTo by remember { mutableStateOf<Subtask?>(null) }
     var editingNotesFor by remember { mutableStateOf<Subtask?>(null) }
+    var openChecklistFor by remember { mutableStateOf<Subtask?>(null) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(project.id, serverUrl) {
@@ -105,7 +109,7 @@ fun SubtasksScreen(
         )
     }
 
-    fun addSubtask(title: String, parentId: Int?) {
+    fun addSubtask(title: String, parentId: Int?, isChecklist: Boolean = false) {
         val trimmed = title.trim()
         if (trimmed.isBlank()) return
         scope.launch {
@@ -113,7 +117,7 @@ fun SubtasksScreen(
                 runCatching {
                     ApiFactory.createSubtask(
                         serverUrl, accessClientId, accessClientSecret,
-                        project.id, trimmed, parentId = parentId,
+                        project.id, trimmed, parentId = parentId, isChecklist = isChecklist,
                     )
                 }
             }.fold(
@@ -229,6 +233,49 @@ fun SubtasksScreen(
         )
     }
 
+    if (addingChecklistChildTo != null) {
+        val parent = addingChecklistChildTo!!
+        var checklistTitle by remember(parent.id) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { addingChecklistChildTo = null },
+            title = { Text("Чек-лист для «${parent.title}»") },
+            text = {
+                OutlinedTextField(
+                    value = checklistTitle,
+                    onValueChange = { checklistTitle = it },
+                    placeholder = { Text("Название") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { addSubtask(checklistTitle, parent.id, isChecklist = true); addingChecklistChildTo = null },
+                    enabled = checklistTitle.isNotBlank(),
+                ) { Text("Добавить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { addingChecklistChildTo = null }) { Text("Отмена") }
+            },
+        )
+    }
+
+    openChecklistFor?.let { container ->
+        ChecklistRunDialog(
+            project = project,
+            container = container,
+            initialChildren = subtasks.filter { it.parent_id == container.id }.sortedBy { it.position },
+            serverUrl = serverUrl,
+            accessClientId = accessClientId,
+            accessClientSecret = accessClientSecret,
+            onDismiss = { openChecklistFor = null },
+            onChildrenChanged = { updated ->
+                val updatedIds = updated.map { it.id }.toSet()
+                subtasks = subtasks.filter { it.id !in updatedIds } + updated
+            },
+        )
+    }
+
     editingNotesFor?.let { target ->
         NotesEditorDialog(
             title = "Заметка · ${target.title}",
@@ -293,6 +340,8 @@ fun SubtasksScreen(
                     onToggleDone = ::toggleDone,
                     onDelete = ::deleteSubtask,
                     onAddChild = { addingChildTo = it },
+                    onAddChecklistChild = { addingChecklistChildTo = it },
+                    onOpenChecklist = { openChecklistFor = it },
                     onEditNotes = { editingNotesFor = it },
                     onIndent = { subtask, newParentId -> reparent(subtask, newParentId) },
                     onOutdent = { subtask, newParentId -> reparent(subtask, newParentId) },
@@ -312,6 +361,12 @@ fun SubtasksScreen(
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = { addSubtask(newTitle, null, isChecklist = true); newTitle = "" },
+                    enabled = newTitle.isNotBlank(),
+                ) {
+                    Icon(Icons.Filled.Checklist, contentDescription = "Добавить чек-лист")
+                }
                 Button(
                     onClick = { addSubtask(newTitle, null); newTitle = "" },
                     enabled = newTitle.isNotBlank(),
@@ -355,6 +410,8 @@ private fun SubtaskTree(
     onToggleDone: (Subtask) -> Unit,
     onDelete: (Subtask) -> Unit,
     onAddChild: (Subtask) -> Unit,
+    onAddChecklistChild: (Subtask) -> Unit,
+    onOpenChecklist: (Subtask) -> Unit,
     onEditNotes: (Subtask) -> Unit,
     onIndent: (Subtask, newParentId: Int?) -> Unit,
     onOutdent: (Subtask, newParentId: Int?) -> Unit,
@@ -402,11 +459,21 @@ private fun SubtaskTree(
                 } else {
                     Spacer(Modifier.size(24.dp))
                 }
-                Checkbox(
-                    checked = subtask.done,
-                    onCheckedChange = { onToggleDone(subtask) },
-                    colors = CheckboxDefaults.colors(checkedColor = accentColor),
-                )
+                if (subtask.is_checklist) {
+                    IconButton(onClick = { onOpenChecklist(subtask) }, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            imageVector = Icons.Filled.Checklist,
+                            contentDescription = "Открыть чек-лист",
+                            tint = accentColor,
+                        )
+                    }
+                } else {
+                    Checkbox(
+                        checked = subtask.done,
+                        onCheckedChange = { onToggleDone(subtask) },
+                        colors = CheckboxDefaults.colors(checkedColor = accentColor),
+                    )
+                }
                 Text(
                     text = subtask.title,
                     style = MaterialTheme.typography.bodyLarge.let {
@@ -418,7 +485,10 @@ private fun SubtaskTree(
                         MaterialTheme.colorScheme.onSurface
                     },
                     maxLines = 1,
-                    modifier = Modifier.weight(1f).padding(start = 4.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 4.dp)
+                        .let { if (subtask.is_checklist) it.clickable { onOpenChecklist(subtask) } else it },
                 )
                 IconButton(onClick = { onEditNotes(subtask) }) {
                     Icon(
@@ -440,6 +510,11 @@ private fun SubtaskTree(
                             text = { Text("Добавить подзадачу") },
                             leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
                             onClick = { menuExpanded = false; onAddChild(subtask) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Добавить чек-лист") },
+                            leadingIcon = { Icon(Icons.Filled.Checklist, contentDescription = null) },
+                            onClick = { menuExpanded = false; onAddChecklistChild(subtask) },
                         )
                         DropdownMenuItem(
                             text = { Text("Сделать вложенной") },

@@ -100,3 +100,11 @@ def ensure_schema_migrations():
                 "ALTER TABLE subtasks ADD COLUMN parent_id INTEGER REFERENCES subtasks(id) ON DELETE CASCADE"
             )
             conn.commit()
+        if "is_checklist" not in subtask_columns:
+            conn.exec_driver_sql("ALTER TABLE subtasks ADD COLUMN is_checklist INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        if "instant_event_id" not in subtask_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE subtasks ADD COLUMN instant_event_id INTEGER REFERENCES events(id) ON DELETE SET NULL"
+            )
+            conn.commit()

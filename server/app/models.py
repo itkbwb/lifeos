@@ -133,6 +133,21 @@ class Subtask(Base):
     done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Marks this subtask as an "instant checklist" container (chapter:
+    # checklist entity) - its direct children are flat checkbox items whose
+    # `done` toggling fires Instant/start/end calendar Events (see
+    # update_subtask). Set only at creation time - not exposed on
+    # SubtaskUpdate, retroactively converting an existing subtask isn't
+    # supported (delete/recreate instead).
+    is_checklist: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Meaningful only on a direct child of an is_checklist subtask - the
+    # Event currently backing this item's checked state (SET NULL if that
+    # Event is ever deleted directly). Null while unchecked, whether never
+    # checked or reset via checklist-reset (which clears this WITHOUT
+    # deleting the Event - it stays in the calendar as history).
+    instant_event_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("events.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime,
         default=lambda: datetime.now(timezone.utc),

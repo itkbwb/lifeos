@@ -9,4 +9,6 @@ data class Subtask(
     val created_at: String,
     val parent_id: Int? = null,
     val notes: String? = null,
+    val is_checklist: Boolean = false,
+    val instant_event_id: Int? = null,
 )
