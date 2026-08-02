@@ -593,6 +593,70 @@ object ApiFactory {
     }
 
     /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun createReminder(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        remindAt: String,
+        message: String,
+    ): Reminder {
+        val json = gson.toJson(mapOf("remind_at" to remindAt, "message" to message))
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/reminders")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("createReminder failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("createReminder: empty response body")
+            return gson.fromJson(body, Reminder::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun listReminders(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        from: String? = null,
+        to: String? = null,
+    ): List<Reminder> {
+        val params = mutableListOf<String>()
+        from?.let { params += "from=" + URLEncoder.encode(it, "UTF-8") }
+        to?.let { params += "to=" + URLEncoder.encode(it, "UTF-8") }
+        val query = if (params.isEmpty()) "" else "?" + params.joinToString("&")
+        val requestBuilder = Request.Builder().url(normalize(baseUrl) + "api/reminders" + query)
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("listReminders failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("listReminders: empty response body")
+            val type = object : TypeToken<List<Reminder>>() {}.type
+            return gson.fromJson(body, type)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun deleteReminder(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        id: Int,
+    ) {
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/reminders/$id")
+            .delete()
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("deleteReminder failed: HTTP ${response.code}")
+            }
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
     fun listSubtasks(
         baseUrl: String,
         accessClientId: String = "",

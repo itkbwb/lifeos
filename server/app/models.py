@@ -172,6 +172,25 @@ class DeviceToken(Base):
     )
 
 
+class Reminder(Base):
+    """A one-off "remind me at this date+time" note (chapter: special reminders) -
+    distinct from PlanEntry/DynamicPlanEntry (which schedule project work) and from
+    Event (which records something that happened). `notified` flips to True once the
+    scheduler has pushed it - never reset, a fired reminder stays fired."""
+
+    __tablename__ = "reminders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    remind_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
+    message: Mapped[str] = mapped_column(String, nullable=False)
+    notified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class NotificationState(Base):
     """Dedup state for the server-side push scheduler - one row per kind
     (e.g. "last_start_notified_plan_entry_id"), so the same Dynamic Plan

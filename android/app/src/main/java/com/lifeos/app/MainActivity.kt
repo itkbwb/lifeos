@@ -18,12 +18,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,7 +42,9 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.SettingsStore
 import com.lifeos.app.notifications.LifeOsFirebaseMessagingService
+import com.lifeos.app.notifications.ReminderEvents
 import com.lifeos.app.ui.ProjectsScreen
+import com.lifeos.app.ui.RemindersScreen
 import com.lifeos.app.ui.SettingsScreen
 import com.lifeos.app.ui.calendar.CalendarScreen
 import com.lifeos.app.ui.calendar.DashboardScreen
@@ -125,6 +130,15 @@ private fun LifeOsRoot(
     var section by remember { mutableStateOf(Section.Dashboard) }
     var updateStatus by remember { mutableStateOf("") }
     var connectionStatus by remember { mutableStateOf("") }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Surfaces a fired reminder as a small dismissible snackbar (not a blocking dialog) while
+    // the app is open, regardless of which tab is active - see ReminderEvents' doc comment.
+    LaunchedEffect(Unit) {
+        ReminderEvents.messages.collect { message ->
+            snackbarHostState.showSnackbar(message, withDismissAction = true)
+        }
+    }
 
     LaunchedEffect(Unit) {
         settingsStore.discardLegacyPlaintextCredentials()
@@ -176,6 +190,7 @@ private fun LifeOsRoot(
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
@@ -197,6 +212,12 @@ private fun LifeOsRoot(
                     label = { Text("Проекты") },
                 )
                 NavigationBarItem(
+                    selected = section == Section.Reminders,
+                    onClick = { section = Section.Reminders },
+                    icon = { Icon(Icons.Default.Notifications, contentDescription = null) },
+                    label = { Text("Напоминания") },
+                )
+                NavigationBarItem(
                     selected = section == Section.Settings,
                     onClick = { section = Section.Settings },
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) },
@@ -214,6 +235,12 @@ private fun LifeOsRoot(
                 )
 
                 Section.Calendar -> CalendarScreen(
+                    serverUrl = serverUrl,
+                    accessClientId = accessClientId,
+                    accessClientSecret = accessClientSecret,
+                )
+
+                Section.Reminders -> RemindersScreen(
                     serverUrl = serverUrl,
                     accessClientId = accessClientId,
                     accessClientSecret = accessClientSecret,
@@ -284,4 +311,4 @@ private fun LifeOsRoot(
     }
 }
 
-private enum class Section { Dashboard, Calendar, Projects, Settings }
+private enum class Section { Dashboard, Calendar, Projects, Reminders, Settings }

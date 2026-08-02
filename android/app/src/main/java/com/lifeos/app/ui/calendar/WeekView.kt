@@ -21,7 +21,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -79,6 +82,7 @@ fun WeekView(
     serverUrl: String,
     accessClientId: String,
     accessClientSecret: String,
+    reminderDates: Set<LocalDate> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     val baseWeekStart = remember { weekStart(LocalDate.now()) }
@@ -122,6 +126,7 @@ fun WeekView(
             accessClientId = accessClientId,
             accessClientSecret = accessClientSecret,
             onOpenDay = onOpenDay,
+            reminderDates = reminderDates,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -135,6 +140,7 @@ private fun WeekGrid(
     accessClientId: String,
     accessClientSecret: String,
     onOpenDay: (LocalDate) -> Unit,
+    reminderDates: Set<LocalDate> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     val zone = remember { ZoneId.systemDefault() }
@@ -189,6 +195,14 @@ private fun WeekGrid(
                         textAlign = TextAlign.Center,
                     )
                     DayNumberBadge(date = day, compact = true)
+                    if (day in reminderDates) {
+                        Icon(
+                            Icons.Filled.Star,
+                            contentDescription = "Есть напоминание",
+                            modifier = Modifier.size(10.dp),
+                            tint = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
                 }
             }
         }

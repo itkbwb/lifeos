@@ -496,3 +496,165 @@ fun DynamicEntryEditDialog(
         },
     )
 }
+
+/**
+ * Retroactively logs a Timeline interval - a start/end Event pair sharing one label - for an
+ * arbitrary date (chapter: calendar "+" button). Unlike the live "Play"/"Stop" buttons, which
+ * always use "now", this always requires an explicit date and both times up front. Both events
+ * are created with the same label so the calendar never shows a mismatched name at start vs
+ * finish (see the label fix on endProject/stopProject).
+ */
+@Composable
+fun TimelineFormDialog(
+    projects: List<Project>,
+    initialDate: LocalDate,
+    errorMessage: String,
+    onDismiss: () -> Unit,
+    onConfirm: (
+        projectId: Int,
+        date: LocalDate,
+        startTime: LocalTime,
+        endTime: LocalTime,
+        name: String,
+    ) -> Unit,
+) {
+    var selectedProjectId by remember { mutableStateOf(projects.firstOrNull()?.id) }
+    var name by remember { mutableStateOf("") }
+    var dateText by remember { mutableStateOf(PLAN_DATE_FORMAT.format(initialDate)) }
+    val now = remember { LocalTime.now() }
+    var startText by remember { mutableStateOf(PLAN_TIME_FORMAT.format(now)) }
+    var endText by remember { mutableStateOf(PLAN_TIME_FORMAT.format(now.plusHours(1))) }
+
+    val date = runCatching { LocalDate.parse(dateText, PLAN_DATE_FORMAT) }.getOrNull()
+    val startTime = runCatching { LocalTime.parse(startText, PLAN_TIME_FORMAT) }.getOrNull()
+    val endTime = runCatching { LocalTime.parse(endText, PLAN_TIME_FORMAT) }.getOrNull()
+    val isValid = selectedProjectId != null && date != null && startTime != null && endTime != null &&
+        endTime > startTime && name.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Добавить таймлайн") },
+        text = {
+            Column {
+                ProjectPicker(projects, selectedProjectId, onSelect = { selectedProjectId = it })
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Название") },
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = dateText,
+                    onValueChange = { dateText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Дата") },
+                    placeholder = { Text("2026-08-01") },
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = startText,
+                        onValueChange = { startText = it },
+                        modifier = Modifier.fillMaxWidth(0.5f),
+                        label = { Text("Начало") },
+                        placeholder = { Text("09:00") },
+                    )
+                    OutlinedTextField(
+                        value = endText,
+                        onValueChange = { endText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Конец") },
+                        placeholder = { Text("10:00") },
+                    )
+                }
+                if (errorMessage.isNotBlank()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(errorMessage, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onConfirm(selectedProjectId!!, date!!, startTime!!, endTime!!, name.trim())
+                },
+                enabled = isValid,
+            ) { Text("Добавить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+
+/**
+ * Retroactively logs an Instant event for an arbitrary date/time (chapter: calendar "+" button).
+ * Unlike the live "Instant" button on Dashboard/Projects, which always uses "now", this always
+ * requires an explicit date and time up front.
+ */
+@Composable
+fun InstantFormDialog(
+    projects: List<Project>,
+    initialDate: LocalDate,
+    errorMessage: String,
+    onDismiss: () -> Unit,
+    onConfirm: (projectId: Int, date: LocalDate, time: LocalTime, name: String?) -> Unit,
+) {
+    var selectedProjectId by remember { mutableStateOf(projects.firstOrNull()?.id) }
+    var name by remember { mutableStateOf("") }
+    var dateText by remember { mutableStateOf(PLAN_DATE_FORMAT.format(initialDate)) }
+    var timeText by remember { mutableStateOf(PLAN_TIME_FORMAT.format(LocalTime.now())) }
+
+    val date = runCatching { LocalDate.parse(dateText, PLAN_DATE_FORMAT) }.getOrNull()
+    val time = runCatching { LocalTime.parse(timeText, PLAN_TIME_FORMAT) }.getOrNull()
+    val isValid = selectedProjectId != null && date != null && time != null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Добавить мгновенное") },
+        text = {
+            Column {
+                ProjectPicker(projects, selectedProjectId, onSelect = { selectedProjectId = it })
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Название") },
+                    placeholder = { Text("Необязательно") },
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = dateText,
+                    onValueChange = { dateText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Дата") },
+                    placeholder = { Text("2026-08-01") },
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = timeText,
+                    onValueChange = { timeText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Время") },
+                    placeholder = { Text("09:00") },
+                )
+                if (errorMessage.isNotBlank()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(errorMessage, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(selectedProjectId!!, date!!, time!!, name.ifBlank { null }) },
+                enabled = isValid,
+            ) { Text("Добавить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}

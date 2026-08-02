@@ -3,14 +3,19 @@ package com.lifeos.app.ui.calendar
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.time.DayOfWeek
+import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
@@ -49,6 +55,7 @@ fun MonthGrid(
     compact: Boolean,
     onDayClick: ((java.time.LocalDate) -> Unit)? = null,
     onMonthClick: (() -> Unit)? = null,
+    reminderDates: Set<LocalDate> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     val dates = remember(yearMonth) { monthGridDates(yearMonth) }
@@ -85,27 +92,42 @@ fun MonthGrid(
             Row(modifier = Modifier.fillMaxWidth()) {
                 week.forEach { date ->
                     val inMonth = date.month == yearMonth.month && date.year == yearMonth.year
-                    Column(
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .aspectRatio(1f)
                             .let {
                                 if (!compact && onDayClick != null) it.clickable { onDayClick(date) } else it
                             },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
                     ) {
-                        // Year's compact mini-months show only their own days (Google Calendar
-                        // style); Month scale keeps adjacent-month days for a stable 6-row grid.
-                        if (inMonth || !compact) {
-                            DayNumberBadge(
-                                date = date,
-                                compact = compact,
-                                color = if (inMonth) {
-                                    MaterialTheme.colorScheme.onSurface
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            // Year's compact mini-months show only their own days (Google
+                            // Calendar style); Month scale keeps adjacent-month days for a
+                            // stable 6-row grid.
+                            if (inMonth || !compact) {
+                                DayNumberBadge(
+                                    date = date,
+                                    compact = compact,
+                                    color = if (inMonth) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                        // Only in Month scale (not Year's compact mini-months, too small for it)
+                        // and only for days that actually belong to this month.
+                        if (!compact && inMonth && date in reminderDates) {
+                            Icon(
+                                Icons.Filled.Star,
+                                contentDescription = "Есть напоминание",
+                                modifier = Modifier.align(Alignment.TopEnd).padding(2.dp).size(10.dp),
+                                tint = MaterialTheme.colorScheme.tertiary,
                             )
                         }
                     }
@@ -121,6 +143,7 @@ fun MonthView(
     selectedYearMonth: YearMonth,
     onYearMonthChange: (YearMonth) -> Unit,
     onOpenWeek: (java.time.LocalDate) -> Unit,
+    reminderDates: Set<LocalDate> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     val baseYearMonth = remember { YearMonth.now() }
@@ -152,6 +175,7 @@ fun MonthView(
             yearMonth = ym,
             compact = false,
             onDayClick = onOpenWeek,
+            reminderDates = reminderDates,
             modifier = Modifier.padding(8.dp),
         )
     }

@@ -241,9 +241,13 @@ private fun ChecklistRunContent(
                 scope.launch {
                     withContext(Dispatchers.IO) {
                         runCatching {
+                            // Same label the active session was started with, or start/finish
+                            // show mismatched names on the calendar - fetch fresh.
+                            val activeLabel = ApiFactory.getActiveProject(serverUrl, accessClientId, accessClientSecret)
+                                ?.takeIf { it.project_id == sub.activeProjectId }?.label
                             ApiFactory.createEvent(
                                 serverUrl, accessClientId, accessClientSecret,
-                                projectId = sub.activeProjectId, type = "end",
+                                projectId = sub.activeProjectId, type = "end", label = activeLabel,
                             )
                         }
                     }.onFailure { error = "Не удалось завершить сессию" }
@@ -254,9 +258,11 @@ private fun ChecklistRunContent(
                 scope.launch {
                     withContext(Dispatchers.IO) {
                         runCatching {
+                            val activeLabel = ApiFactory.getActiveProject(serverUrl, accessClientId, accessClientSecret)
+                                ?.takeIf { it.project_id == sub.activeProjectId }?.label
                             ApiFactory.createEvent(
                                 serverUrl, accessClientId, accessClientSecret,
-                                projectId = sub.activeProjectId, type = "end",
+                                projectId = sub.activeProjectId, type = "end", label = activeLabel,
                             )
                         }
                     }.onFailure { error = "Не удалось завершить сессию" }

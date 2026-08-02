@@ -29,6 +29,13 @@ class LifeOsFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
+        when (data["type"]) {
+            "start", "end" -> handleSuggestion(data)
+            "reminder" -> handleReminder(data)
+        }
+    }
+
+    private fun handleSuggestion(data: Map<String, String>) {
         val type = data["type"] ?: return
         val projectId = data["project_id"]?.toIntOrNull() ?: return
         val projectName = data["project_name"] ?: "проект"
@@ -38,6 +45,16 @@ class LifeOsFirebaseMessagingService : FirebaseMessagingService() {
             "start" -> Notifications.postStartSuggestion(applicationContext, projectId, projectName, notificationId)
             "end" -> Notifications.postStopSuggestion(applicationContext, projectId, projectName, notificationId)
         }
+    }
+
+    private fun handleReminder(data: Map<String, String>) {
+        val reminderId = data["reminder_id"]?.toIntOrNull() ?: return
+        val message = data["message"] ?: return
+        // Offset well clear of the projectId*2(+1) IDs handleSuggestion uses, so a reminder
+        // notification can never collide with a start/stop suggestion's.
+        Notifications.postReminder(applicationContext, message, notificationId = 1_000_000 + reminderId)
+        // Also surfaced as an in-app snackbar (with its own close "x") when the app is open.
+        ReminderEvents.emit(message)
     }
 
     companion object {

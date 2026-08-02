@@ -24,6 +24,7 @@ import com.lifeos.app.R
 object Notifications {
     const val CHANNEL_START = "start_suggestions"
     const val CHANNEL_STOP = "stop_suggestions"
+    const val CHANNEL_REMINDER = "reminders"
 
     const val ACTION_START_PROJECT = "com.lifeos.app.action.START_PROJECT"
     const val ACTION_END_PROJECT = "com.lifeos.app.action.END_PROJECT"
@@ -38,6 +39,9 @@ object Notifications {
         )
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_STOP, "Предложения закончить", NotificationManager.IMPORTANCE_DEFAULT),
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_REMINDER, "Напоминания", NotificationManager.IMPORTANCE_HIGH),
         )
     }
 
@@ -79,6 +83,23 @@ object Notifications {
             .setContentIntent(openAppIntent(context, notificationId))
             .addAction(0, "Закончить", actionIntent(context, ACTION_END_PROJECT, projectId, notificationId))
             .addAction(0, "Игнорировать", actionIntent(context, ACTION_DISMISS, projectId, notificationId))
+            .build()
+        NotificationManagerCompat.from(context).notify(notificationId, notification)
+        return true
+    }
+
+    /** No action buttons, unlike start/stop suggestions - a reminder is just informational,
+     * tapping it (or the body) simply opens the app. */
+    fun postReminder(context: Context, message: String, notificationId: Int): Boolean {
+        ensureChannels(context)
+        if (!hasPostPermission(context)) return false
+        val notification = NotificationCompat.Builder(context, CHANNEL_REMINDER)
+            .setSmallIcon(R.drawable.ic_instant_sparkle)
+            .setContentTitle("Напоминание")
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setAutoCancel(true)
+            .setContentIntent(openAppIntent(context, notificationId))
             .build()
         NotificationManagerCompat.from(context).notify(notificationId, notification)
         return true
