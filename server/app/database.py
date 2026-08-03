@@ -95,6 +95,22 @@ def ensure_schema_migrations():
             )
             conn.commit()
 
+        recurring_plan_columns = {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(recurring_plans)").fetchall()
+        }
+        if "frequency" not in recurring_plan_columns:
+            conn.exec_driver_sql("ALTER TABLE recurring_plans ADD COLUMN frequency TEXT NOT NULL DEFAULT 'weekly'")
+            conn.commit()
+        if "interval" not in recurring_plan_columns:
+            conn.exec_driver_sql("ALTER TABLE recurring_plans ADD COLUMN interval INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+        if "month_mode" not in recurring_plan_columns:
+            conn.exec_driver_sql("ALTER TABLE recurring_plans ADD COLUMN month_mode TEXT")
+            conn.commit()
+        if "max_occurrences" not in recurring_plan_columns:
+            conn.exec_driver_sql("ALTER TABLE recurring_plans ADD COLUMN max_occurrences INTEGER")
+            conn.commit()
+
         subtask_columns = {
             row[1] for row in conn.exec_driver_sql("PRAGMA table_info(subtasks)").fetchall()
         }

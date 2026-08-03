@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -62,6 +63,7 @@ import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.Project
 import com.lifeos.app.data.Subtask
 import com.lifeos.app.ui.theme.ProjectColors
+import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -98,6 +100,8 @@ fun SubtasksScreen(
     var addingChecklistChildTo by remember { mutableStateOf<Subtask?>(null) }
     var editingNotesFor by remember { mutableStateOf<Subtask?>(null) }
     var openChecklistFor by remember { mutableStateOf<Subtask?>(null) }
+    var schedulingSubtask by remember { mutableStateOf<Subtask?>(null) }
+    var scheduleError by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(project.id, serverUrl) {
@@ -298,6 +302,66 @@ fun SubtasksScreen(
         )
     }
 
+    schedulingSubtask?.let { target ->
+        StaticPlanFormDialog(
+            projects = listOf(project),
+            errorMessage = scheduleError,
+            serverUrl = serverUrl,
+            accessClientId = accessClientId,
+            accessClientSecret = accessClientSecret,
+            initialName = target.title,
+            initialSubtaskId = target.id,
+            onDismiss = { schedulingSubtask = null; scheduleError = "" },
+            onConfirm = { projectId, date, startTime, endTime, name, subtaskId ->
+                val zone = ZoneId.systemDefault()
+                val startInstant = date.atTime(startTime).atZone(zone).toInstant().toString()
+                val endInstant = date.atTime(endTime).atZone(zone).toInstant().toString()
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.createPlanEntry(
+                                serverUrl, accessClientId, accessClientSecret,
+                                projectId = projectId, startTime = startInstant, endTime = endInstant,
+                                name = name, subtaskId = subtaskId,
+                            )
+                        }
+                    }.onSuccess {
+                        schedulingSubtask = null
+                        scheduleError = ""
+                    }.onFailure { scheduleError = "Не удалось запланировать" }
+                }
+            },
+            onConfirmRecurring = { projectId, date, startTime, endTime, name, subtaskId, recurrence ->
+                val api = recurrence.toApiParams()
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.createRecurringPlan(
+                                serverUrl, accessClientId, accessClientSecret,
+                                projectId = projectId,
+                                startTimeOfDay = startTime.toString(),
+                                endTimeOfDay = endTime.toString(),
+                                frequency = api.frequency,
+                                interval = api.interval,
+                                weekdays = api.weekdays,
+                                monthMode = api.monthMode,
+                                maxOccurrences = api.maxOccurrences,
+                                timezone = ZoneId.systemDefault().id,
+                                seriesStartDate = date.toString(),
+                                seriesEndDate = api.seriesEndDate,
+                                name = name,
+                                subtaskId = subtaskId,
+                            )
+                        }
+                    }.onSuccess {
+                        schedulingSubtask = null
+                        scheduleError = ""
+                    }.onFailure { scheduleError = "Не удалось сохранить повтор" }
+                }
+            },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -343,6 +407,7 @@ fun SubtasksScreen(
                     onAddChecklistChild = { addingChecklistChildTo = it },
                     onOpenChecklist = { openChecklistFor = it },
                     onEditNotes = { editingNotesFor = it },
+                    onSchedule = { schedulingSubtask = it; scheduleError = "" },
                     onIndent = { subtask, newParentId -> reparent(subtask, newParentId) },
                     onOutdent = { subtask, newParentId -> reparent(subtask, newParentId) },
                     modifier = Modifier.weight(1f),
@@ -413,6 +478,7 @@ private fun SubtaskTree(
     onAddChecklistChild: (Subtask) -> Unit,
     onOpenChecklist: (Subtask) -> Unit,
     onEditNotes: (Subtask) -> Unit,
+    onSchedule: (Subtask) -> Unit,
     onIndent: (Subtask, newParentId: Int?) -> Unit,
     onOutdent: (Subtask, newParentId: Int?) -> Unit,
     modifier: Modifier = Modifier,
@@ -506,6 +572,11 @@ private fun SubtaskTree(
                         Icon(Icons.Filled.MoreVert, contentDescription = "Ещё")
                     }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Запланировать") },
+                            leadingIcon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
+                            onClick = { menuExpanded = false; onSchedule(subtask) },
+                        )
                         DropdownMenuItem(
                             text = { Text("Добавить подзадачу") },
                             leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },

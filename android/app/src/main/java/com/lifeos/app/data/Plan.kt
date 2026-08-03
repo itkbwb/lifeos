@@ -14,8 +14,13 @@ data class PlanEntry(
 /**
  * A recurring Static Plan template (chapter: recurring plans) - materializes into normal
  * PlanEntry rows on a rolling ~30-day window server-side (app/recurrence.py), same as this app
- * never plans anything into infinity. `weekdays` is a comma-separated ISO weekday list
- * (Mon=1..Sun=7, e.g. "1,2,3,4,5" for weekdays).
+ * never plans anything into infinity. A simplified RRULE matching the presets Google
+ * Calendar's own recurrence picker exposes: `frequency` is "daily"|"weekly"|"monthly"|"yearly",
+ * `interval` is "every N {frequency}", `weekdays` (only for weekly) is a comma-separated ISO
+ * weekday list (Mon=1..Sun=7), `month_mode` (only for monthly) is "day_of_month" (same
+ * day-of-month as series_start_date) or "weekday_of_month" (same "Nth weekday", e.g. "the
+ * third Monday"), and `max_occurrences` is an independent "after N times" end condition on top
+ * of `series_end_date`.
  */
 data class RecurringPlan(
     val id: Int,
@@ -24,7 +29,11 @@ data class RecurringPlan(
     val name: String?,
     val start_time_of_day: String,
     val end_time_of_day: String,
+    val frequency: String,
+    val interval: Int,
     val weekdays: String,
+    val month_mode: String?,
+    val max_occurrences: Int?,
     val timezone: String,
     val series_start_date: String,
     val series_end_date: String?,

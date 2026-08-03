@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 PROJECT_COLORS = {"lavender", "blue", "green", "yellow", "orange", "red", "pink", "gray"}
+RECURRENCE_FREQUENCIES = {"daily", "weekly", "monthly", "yearly"}
+MONTH_MODES = {"day_of_month", "weekday_of_month"}
 
 
 def _validate_time_of_day(v: str) -> str:
@@ -32,6 +34,30 @@ def _validate_timezone(v: str) -> str:
         ZoneInfo(v)
     except ZoneInfoNotFoundError as exc:
         raise ValueError("unknown IANA timezone") from exc
+    return v
+
+
+def _validate_frequency(v: str) -> str:
+    if v not in RECURRENCE_FREQUENCIES:
+        raise ValueError(f"frequency must be one of {sorted(RECURRENCE_FREQUENCIES)}")
+    return v
+
+
+def _validate_interval(v: int) -> int:
+    if v < 1:
+        raise ValueError("interval must be >= 1")
+    return v
+
+
+def _validate_month_mode(v: str) -> str:
+    if v not in MONTH_MODES:
+        raise ValueError(f"month_mode must be one of {sorted(MONTH_MODES)}")
+    return v
+
+
+def _validate_max_occurrences(v: int) -> int:
+    if v < 1:
+        raise ValueError("max_occurrences must be >= 1")
     return v
 
 
@@ -228,7 +254,14 @@ class RecurringPlanCreate(BaseModel):
     name: Optional[str] = None
     start_time_of_day: str
     end_time_of_day: str
-    weekdays: str
+    frequency: str = "weekly"
+    interval: int = 1
+    # Required (non-empty) when frequency == "weekly"; ignored otherwise.
+    weekdays: Optional[str] = None
+    # Required when frequency == "monthly" (defaults to "day_of_month" if omitted); ignored
+    # otherwise.
+    month_mode: Optional[str] = None
+    max_occurrences: Optional[int] = None
     timezone: str
     series_start_date: date
     series_end_date: Optional[date] = None
@@ -238,10 +271,30 @@ class RecurringPlanCreate(BaseModel):
     def valid_time_of_day(cls, v: str) -> str:
         return _validate_time_of_day(v)
 
+    @field_validator("frequency")
+    @classmethod
+    def valid_frequency(cls, v: str) -> str:
+        return _validate_frequency(v)
+
+    @field_validator("interval")
+    @classmethod
+    def valid_interval(cls, v: int) -> int:
+        return _validate_interval(v)
+
     @field_validator("weekdays")
     @classmethod
-    def valid_weekdays(cls, v: str) -> str:
-        return _validate_weekdays(v)
+    def valid_weekdays(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_weekdays(v)
+
+    @field_validator("month_mode")
+    @classmethod
+    def valid_month_mode(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_month_mode(v)
+
+    @field_validator("max_occurrences")
+    @classmethod
+    def valid_max_occurrences(cls, v: Optional[int]) -> Optional[int]:
+        return v if v is None else _validate_max_occurrences(v)
 
     @field_validator("timezone")
     @classmethod
@@ -257,11 +310,15 @@ class RecurringPlanCreate(BaseModel):
         return v or None
 
     @model_validator(mode="after")
-    def end_after_start(self) -> "RecurringPlanCreate":
+    def frequency_specific_requirements(self) -> "RecurringPlanCreate":
         if time.fromisoformat(self.end_time_of_day) <= time.fromisoformat(self.start_time_of_day):
             raise ValueError("end_time_of_day must be after start_time_of_day")
         if self.series_end_date is not None and self.series_end_date < self.series_start_date:
             raise ValueError("series_end_date must not be before series_start_date")
+        if self.frequency == "weekly" and not self.weekdays:
+            raise ValueError("weekly frequency requires weekdays")
+        if self.frequency == "monthly" and self.month_mode is None:
+            self.month_mode = "day_of_month"
         return self
 
 
@@ -276,7 +333,11 @@ class RecurringPlanUpdate(BaseModel):
     name: Optional[str] = None
     start_time_of_day: Optional[str] = None
     end_time_of_day: Optional[str] = None
+    frequency: Optional[str] = None
+    interval: Optional[int] = None
     weekdays: Optional[str] = None
+    month_mode: Optional[str] = None
+    max_occurrences: Optional[int] = None
     series_end_date: Optional[date] = None
 
     @field_validator("start_time_of_day", "end_time_of_day")
@@ -284,10 +345,30 @@ class RecurringPlanUpdate(BaseModel):
     def valid_time_of_day(cls, v: Optional[str]) -> Optional[str]:
         return v if v is None else _validate_time_of_day(v)
 
+    @field_validator("frequency")
+    @classmethod
+    def valid_frequency(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_frequency(v)
+
+    @field_validator("interval")
+    @classmethod
+    def valid_interval(cls, v: Optional[int]) -> Optional[int]:
+        return v if v is None else _validate_interval(v)
+
     @field_validator("weekdays")
     @classmethod
     def valid_weekdays(cls, v: Optional[str]) -> Optional[str]:
         return v if v is None else _validate_weekdays(v)
+
+    @field_validator("month_mode")
+    @classmethod
+    def valid_month_mode(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_month_mode(v)
+
+    @field_validator("max_occurrences")
+    @classmethod
+    def valid_max_occurrences(cls, v: Optional[int]) -> Optional[int]:
+        return v if v is None else _validate_max_occurrences(v)
 
     @field_validator("name")
     @classmethod
@@ -307,7 +388,11 @@ class RecurringPlanOut(BaseModel):
     name: Optional[str]
     start_time_of_day: str
     end_time_of_day: str
+    frequency: str
+    interval: int
     weekdays: str
+    month_mode: Optional[str]
+    max_occurrences: Optional[int]
     timezone: str
     series_start_date: date
     series_end_date: Optional[date]
@@ -318,16 +403,19 @@ class RecurrenceSplitRequest(BaseModel):
     """Body for POST /api/plan/entries/{entry_id}/recurrence/split ("this and following"
     edit, chapter: recurring plans) - ends the original series the day before this
     occurrence's date and starts a new series from that date with these values. Timezone and
-    weekday math for the new series reuse the original series' timezone."""
+    any pattern field left unset (None) are inherited from the original series - the quick
+    "this and following" edit from the Day Summary usually only changes time/project/name."""
 
     project_id: int
     subtask_id: Optional[int] = None
     name: Optional[str] = None
     start_time_of_day: str
     end_time_of_day: str
-    # None = keep the original series' weekday pattern - the quick "this and following" edit
-    # from the Day Summary only changes time/project/name, not which days it repeats on.
+    frequency: Optional[str] = None
+    interval: Optional[int] = None
     weekdays: Optional[str] = None
+    month_mode: Optional[str] = None
+    max_occurrences: Optional[int] = None
     series_end_date: Optional[date] = None
 
     @field_validator("start_time_of_day", "end_time_of_day")
@@ -335,10 +423,30 @@ class RecurrenceSplitRequest(BaseModel):
     def valid_time_of_day(cls, v: str) -> str:
         return _validate_time_of_day(v)
 
+    @field_validator("frequency")
+    @classmethod
+    def valid_frequency(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_frequency(v)
+
+    @field_validator("interval")
+    @classmethod
+    def valid_interval(cls, v: Optional[int]) -> Optional[int]:
+        return v if v is None else _validate_interval(v)
+
     @field_validator("weekdays")
     @classmethod
     def valid_weekdays(cls, v: Optional[str]) -> Optional[str]:
         return v if v is None else _validate_weekdays(v)
+
+    @field_validator("month_mode")
+    @classmethod
+    def valid_month_mode(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_month_mode(v)
+
+    @field_validator("max_occurrences")
+    @classmethod
+    def valid_max_occurrences(cls, v: Optional[int]) -> Optional[int]:
+        return v if v is None else _validate_max_occurrences(v)
 
     @field_validator("name")
     @classmethod

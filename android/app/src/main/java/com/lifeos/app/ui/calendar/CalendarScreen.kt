@@ -41,6 +41,7 @@ import com.lifeos.app.data.Project
 import com.lifeos.app.ui.InstantFormDialog
 import com.lifeos.app.ui.StaticPlanFormDialog
 import com.lifeos.app.ui.TimelineFormDialog
+import com.lifeos.app.ui.toApiParams
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -253,14 +254,15 @@ fun CalendarScreen(
             serverUrl = serverUrl,
             accessClientId = accessClientId,
             accessClientSecret = accessClientSecret,
+            initialDate = selectedDate,
             onDismiss = {
                 showPlanDialog = false
                 planErrorMessage = ""
             },
-            onConfirm = { projectId, startTime, endTime, name, subtaskId ->
+            onConfirm = { projectId, date, startTime, endTime, name, subtaskId ->
                 val zone = ZoneId.systemDefault()
-                val startInstant = selectedDate.atTime(startTime).atZone(zone).toInstant().toString()
-                val endInstant = selectedDate.atTime(endTime).atZone(zone).toInstant().toString()
+                val startInstant = date.atTime(startTime).atZone(zone).toInstant().toString()
+                val endInstant = date.atTime(endTime).atZone(zone).toInstant().toString()
                 coroutineScope.launch {
                     withContext(Dispatchers.IO) {
                         runCatching {
@@ -284,7 +286,8 @@ fun CalendarScreen(
                     }
                 }
             },
-            onConfirmRecurring = { projectId, startTime, endTime, name, subtaskId, weekdays, seriesEndDate ->
+            onConfirmRecurring = { projectId, date, startTime, endTime, name, subtaskId, recurrence ->
+                val api = recurrence.toApiParams()
                 coroutineScope.launch {
                     withContext(Dispatchers.IO) {
                         runCatching {
@@ -295,10 +298,14 @@ fun CalendarScreen(
                                 projectId = projectId,
                                 startTimeOfDay = startTime.toString(),
                                 endTimeOfDay = endTime.toString(),
-                                weekdays = weekdays.sorted().joinToString(","),
+                                frequency = api.frequency,
+                                interval = api.interval,
+                                weekdays = api.weekdays,
+                                monthMode = api.monthMode,
+                                maxOccurrences = api.maxOccurrences,
                                 timezone = ZoneId.systemDefault().id,
-                                seriesStartDate = selectedDate.toString(),
-                                seriesEndDate = seriesEndDate?.toString(),
+                                seriesStartDate = date.toString(),
+                                seriesEndDate = api.seriesEndDate,
                                 name = name,
                                 subtaskId = subtaskId,
                             )

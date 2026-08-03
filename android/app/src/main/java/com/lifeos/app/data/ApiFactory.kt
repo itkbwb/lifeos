@@ -492,9 +492,13 @@ object ApiFactory {
         projectId: Int,
         startTimeOfDay: String,
         endTimeOfDay: String,
-        weekdays: String,
+        frequency: String,
         timezone: String,
         seriesStartDate: String,
+        interval: Int = 1,
+        weekdays: String? = null,
+        monthMode: String? = null,
+        maxOccurrences: Int? = null,
         seriesEndDate: String? = null,
         name: String? = null,
         subtaskId: Int? = null,
@@ -503,10 +507,14 @@ object ApiFactory {
             "project_id" to projectId,
             "start_time_of_day" to startTimeOfDay,
             "end_time_of_day" to endTimeOfDay,
-            "weekdays" to weekdays,
+            "frequency" to frequency,
+            "interval" to interval,
             "timezone" to timezone,
             "series_start_date" to seriesStartDate,
         )
+        weekdays?.let { fields["weekdays"] = it }
+        monthMode?.let { fields["month_mode"] = it }
+        maxOccurrences?.let { fields["max_occurrences"] = it }
         seriesEndDate?.let { fields["series_end_date"] = it }
         name?.let { fields["name"] = it }
         subtaskId?.let { fields["subtask_id"] = it }
@@ -611,6 +619,12 @@ object ApiFactory {
         endTimeOfDay: String,
         name: String? = null,
         subtaskId: Int? = null,
+        frequency: String? = null,
+        interval: Int? = null,
+        weekdays: String? = null,
+        monthMode: String? = null,
+        maxOccurrences: Int? = null,
+        seriesEndDate: String? = null,
     ): RecurringPlan {
         val fields = mutableMapOf<String, Any>(
             "project_id" to projectId,
@@ -619,6 +633,12 @@ object ApiFactory {
         )
         name?.let { fields["name"] = it }
         subtaskId?.let { fields["subtask_id"] = it }
+        frequency?.let { fields["frequency"] = it }
+        interval?.let { fields["interval"] = it }
+        weekdays?.let { fields["weekdays"] = it }
+        monthMode?.let { fields["month_mode"] = it }
+        maxOccurrences?.let { fields["max_occurrences"] = it }
+        seriesEndDate?.let { fields["series_end_date"] = it }
         val json = gson.toJson(fields)
         val requestBuilder = Request.Builder()
             .url(normalize(baseUrl) + "api/plan/entries/$entryId/recurrence/split")
