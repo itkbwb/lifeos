@@ -485,6 +485,155 @@ object ApiFactory {
     }
 
     /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
+    fun createRecurringPlan(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        projectId: Int,
+        startTimeOfDay: String,
+        endTimeOfDay: String,
+        weekdays: String,
+        timezone: String,
+        seriesStartDate: String,
+        seriesEndDate: String? = null,
+        name: String? = null,
+        subtaskId: Int? = null,
+    ): RecurringPlan {
+        val fields = mutableMapOf<String, Any>(
+            "project_id" to projectId,
+            "start_time_of_day" to startTimeOfDay,
+            "end_time_of_day" to endTimeOfDay,
+            "weekdays" to weekdays,
+            "timezone" to timezone,
+            "series_start_date" to seriesStartDate,
+        )
+        seriesEndDate?.let { fields["series_end_date"] = it }
+        name?.let { fields["name"] = it }
+        subtaskId?.let { fields["subtask_id"] = it }
+        val json = gson.toJson(fields)
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/recurring-plans")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("createRecurringPlan failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("createRecurringPlan: empty response body")
+            return gson.fromJson(body, RecurringPlan::class.java)
+        }
+    }
+
+    /** "All occurrences" edit (chapter: recurring plans) - blocking call, run on a background
+     * dispatcher. Throws IOException on failure. */
+    fun updateRecurringPlan(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        id: Int,
+        projectId: Int? = null,
+        name: String? = null,
+        startTimeOfDay: String? = null,
+        endTimeOfDay: String? = null,
+        subtaskId: Int? = null,
+        clearSubtask: Boolean = false,
+        seriesEndDate: String? = null,
+        clearSeriesEndDate: Boolean = false,
+    ): RecurringPlan {
+        val fields = JsonObject()
+        projectId?.let { fields.addProperty("project_id", it) }
+        name?.let { fields.addProperty("name", it) }
+        startTimeOfDay?.let { fields.addProperty("start_time_of_day", it) }
+        endTimeOfDay?.let { fields.addProperty("end_time_of_day", it) }
+        if (clearSubtask) fields.add("subtask_id", JsonNull.INSTANCE) else subtaskId?.let { fields.addProperty("subtask_id", it) }
+        if (clearSeriesEndDate) fields.add("series_end_date", JsonNull.INSTANCE) else seriesEndDate?.let { fields.addProperty("series_end_date", it) }
+        val json = gsonSerializeNulls.toJson(fields)
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/recurring-plans/$id")
+            .patch(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("updateRecurringPlan failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("updateRecurringPlan: empty response body")
+            return gson.fromJson(body, RecurringPlan::class.java)
+        }
+    }
+
+    /** "All occurrences" delete (chapter: recurring plans) - blocking call, run on a
+     * background dispatcher. Throws IOException on failure. */
+    fun deleteRecurringPlan(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        id: Int,
+    ) {
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/recurring-plans/$id")
+            .delete()
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("deleteRecurringPlan failed: HTTP ${response.code}")
+            }
+        }
+    }
+
+    /** "This and following" delete (chapter: recurring plans) - blocking call, run on a
+     * background dispatcher. Throws IOException on failure. */
+    fun stopRecurrence(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        entryId: Int,
+    ) {
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/plan/entries/$entryId/recurrence/stop")
+            .post("".toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("stopRecurrence failed: HTTP ${response.code}")
+            }
+        }
+    }
+
+    /** "This and following" edit (chapter: recurring plans) - blocking call, run on a
+     * background dispatcher. Throws IOException on failure. */
+    fun splitRecurrence(
+        baseUrl: String,
+        accessClientId: String = "",
+        accessClientSecret: String = "",
+        entryId: Int,
+        projectId: Int,
+        startTimeOfDay: String,
+        endTimeOfDay: String,
+        name: String? = null,
+        subtaskId: Int? = null,
+    ): RecurringPlan {
+        val fields = mutableMapOf<String, Any>(
+            "project_id" to projectId,
+            "start_time_of_day" to startTimeOfDay,
+            "end_time_of_day" to endTimeOfDay,
+        )
+        name?.let { fields["name"] = it }
+        subtaskId?.let { fields["subtask_id"] = it }
+        val json = gson.toJson(fields)
+        val requestBuilder = Request.Builder()
+            .url(normalize(baseUrl) + "api/plan/entries/$entryId/recurrence/split")
+            .post(json.toRequestBody(jsonMediaType))
+        addAccessHeaders(requestBuilder, accessClientId, accessClientSecret)
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("splitRecurrence failed: HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("splitRecurrence: empty response body")
+            return gson.fromJson(body, RecurringPlan::class.java)
+        }
+    }
+
+    /** Blocking call - run on a background dispatcher. Throws IOException on failure. */
     fun importCsv(
         baseUrl: String,
         accessClientId: String = "",

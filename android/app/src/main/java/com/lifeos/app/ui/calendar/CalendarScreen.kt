@@ -284,6 +284,34 @@ fun CalendarScreen(
                     }
                 }
             },
+            onConfirmRecurring = { projectId, startTime, endTime, name, subtaskId, weekdays, seriesEndDate ->
+                coroutineScope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            ApiFactory.createRecurringPlan(
+                                serverUrl,
+                                accessClientId,
+                                accessClientSecret,
+                                projectId = projectId,
+                                startTimeOfDay = startTime.toString(),
+                                endTimeOfDay = endTime.toString(),
+                                weekdays = weekdays.sorted().joinToString(","),
+                                timezone = ZoneId.systemDefault().id,
+                                seriesStartDate = selectedDate.toString(),
+                                seriesEndDate = seriesEndDate?.toString(),
+                                name = name,
+                                subtaskId = subtaskId,
+                            )
+                        }
+                    }.onSuccess {
+                        showPlanDialog = false
+                        planErrorMessage = ""
+                        planRefreshKey++
+                    }.onFailure {
+                        planErrorMessage = "Не удалось сохранить повтор"
+                    }
+                }
+            },
         )
     }
 

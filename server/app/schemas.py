@@ -1,11 +1,38 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 PROJECT_COLORS = {"lavender", "blue", "green", "yellow", "orange", "red", "pink", "gray"}
+
+
+def _validate_time_of_day(v: str) -> str:
+    try:
+        time.fromisoformat(v)
+    except ValueError as exc:
+        raise ValueError("must be a HH:MM time") from exc
+    return v
+
+
+def _validate_weekdays(v: str) -> str:
+    try:
+        nums = {int(p) for p in v.split(",")}
+    except ValueError as exc:
+        raise ValueError("weekdays must be comma-separated integers 1-7 (Mon=1..Sun=7)") from exc
+    if not nums or not nums.issubset(set(range(1, 8))):
+        raise ValueError("weekdays must be comma-separated integers 1-7 (Mon=1..Sun=7)")
+    return ",".join(str(n) for n in sorted(nums))
+
+
+def _validate_timezone(v: str) -> str:
+    try:
+        ZoneInfo(v)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("unknown IANA timezone") from exc
+    return v
 
 
 class ProjectCreate(BaseModel):
@@ -191,7 +218,141 @@ class PlanEntryOut(BaseModel):
     end_time: datetime
     name: Optional[str]
     subtask_id: Optional[int]
+    recurring_plan_id: Optional[int]
     created_at: datetime
+
+
+class RecurringPlanCreate(BaseModel):
+    project_id: int
+    subtask_id: Optional[int] = None
+    name: Optional[str] = None
+    start_time_of_day: str
+    end_time_of_day: str
+    weekdays: str
+    timezone: str
+    series_start_date: date
+    series_end_date: Optional[date] = None
+
+    @field_validator("start_time_of_day", "end_time_of_day")
+    @classmethod
+    def valid_time_of_day(cls, v: str) -> str:
+        return _validate_time_of_day(v)
+
+    @field_validator("weekdays")
+    @classmethod
+    def valid_weekdays(cls, v: str) -> str:
+        return _validate_weekdays(v)
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, v: str) -> str:
+        return _validate_timezone(v)
+
+    @field_validator("name")
+    @classmethod
+    def name_blank_to_none(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        return v or None
+
+    @model_validator(mode="after")
+    def end_after_start(self) -> "RecurringPlanCreate":
+        if time.fromisoformat(self.end_time_of_day) <= time.fromisoformat(self.start_time_of_day):
+            raise ValueError("end_time_of_day must be after start_time_of_day")
+        if self.series_end_date is not None and self.series_end_date < self.series_start_date:
+            raise ValueError("series_end_date must not be before series_start_date")
+        return self
+
+
+class RecurringPlanUpdate(BaseModel):
+    """Partial update for the "all occurrences" edit (chapter: recurring plans) - applied to
+    the series template, then the caller regenerates today-forward occurrences under the new
+    values (see app/recurrence.py). `timezone`/`series_start_date` are intentionally not
+    editable here - retroactively changing either is out of scope, delete+recreate instead."""
+
+    project_id: Optional[int] = None
+    subtask_id: Optional[int] = None
+    name: Optional[str] = None
+    start_time_of_day: Optional[str] = None
+    end_time_of_day: Optional[str] = None
+    weekdays: Optional[str] = None
+    series_end_date: Optional[date] = None
+
+    @field_validator("start_time_of_day", "end_time_of_day")
+    @classmethod
+    def valid_time_of_day(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_time_of_day(v)
+
+    @field_validator("weekdays")
+    @classmethod
+    def valid_weekdays(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_weekdays(v)
+
+    @field_validator("name")
+    @classmethod
+    def name_blank_to_none(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        return v or None
+
+
+class RecurringPlanOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    subtask_id: Optional[int]
+    name: Optional[str]
+    start_time_of_day: str
+    end_time_of_day: str
+    weekdays: str
+    timezone: str
+    series_start_date: date
+    series_end_date: Optional[date]
+    created_at: datetime
+
+
+class RecurrenceSplitRequest(BaseModel):
+    """Body for POST /api/plan/entries/{entry_id}/recurrence/split ("this and following"
+    edit, chapter: recurring plans) - ends the original series the day before this
+    occurrence's date and starts a new series from that date with these values. Timezone and
+    weekday math for the new series reuse the original series' timezone."""
+
+    project_id: int
+    subtask_id: Optional[int] = None
+    name: Optional[str] = None
+    start_time_of_day: str
+    end_time_of_day: str
+    # None = keep the original series' weekday pattern - the quick "this and following" edit
+    # from the Day Summary only changes time/project/name, not which days it repeats on.
+    weekdays: Optional[str] = None
+    series_end_date: Optional[date] = None
+
+    @field_validator("start_time_of_day", "end_time_of_day")
+    @classmethod
+    def valid_time_of_day(cls, v: str) -> str:
+        return _validate_time_of_day(v)
+
+    @field_validator("weekdays")
+    @classmethod
+    def valid_weekdays(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_weekdays(v)
+
+    @field_validator("name")
+    @classmethod
+    def name_blank_to_none(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        return v or None
+
+    @model_validator(mode="after")
+    def end_after_start(self) -> "RecurrenceSplitRequest":
+        if time.fromisoformat(self.end_time_of_day) <= time.fromisoformat(self.start_time_of_day):
+            raise ValueError("end_time_of_day must be after start_time_of_day")
+        return self
 
 
 PLAN_CHANGE_TYPES = {"move", "cancel"}

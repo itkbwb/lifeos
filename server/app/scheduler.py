@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from app import models, notifications
+from app import models, notifications, recurrence
 from app.database import SessionLocal
 
 logger = logging.getLogger("lifeos.scheduler")
@@ -46,6 +46,14 @@ def check_and_notify() -> None:
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start + timedelta(days=1)
+
+        # Rolls the recurring-plans generation window forward (chapter: recurring plans) -
+        # throttled to once/day since it's the same every tick otherwise (generate_occurrences
+        # is idempotent, but there's no reason to re-check on every 60s tick).
+        today_ordinal = now.date().toordinal()
+        if _get_state(db, "recurring_plans_last_synced_date") != today_ordinal:
+            recurrence.sync_all(db)
+            _set_state(db, "recurring_plans_last_synced_date", today_ordinal)
 
         dynamic_plan = main_module.get_dynamic_plan(project_id=None, from_=today_start, to=today_end, db=db)
         active = main_module.get_active_start(db)

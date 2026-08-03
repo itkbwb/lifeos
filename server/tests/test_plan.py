@@ -16,7 +16,9 @@ def test_create_plan_entry(client):
     body = resp.json()
     assert body["project_id"] == project["id"]
     assert body["name"] is None
-    assert set(body.keys()) == {"id", "project_id", "start_time", "end_time", "name", "created_at"}
+    assert set(body.keys()) == {
+        "id", "project_id", "start_time", "end_time", "name", "subtask_id", "recurring_plan_id", "created_at",
+    }
 
 
 def test_create_plan_entry_with_name(client):
