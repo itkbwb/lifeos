@@ -738,7 +738,11 @@ def create_recurring_plan(payload: schemas.RecurringPlanCreate, db: Session = De
         name=payload.name,
         start_time_of_day=payload.start_time_of_day,
         end_time_of_day=payload.end_time_of_day,
-        weekdays=payload.weekdays,
+        frequency=payload.frequency,
+        interval=payload.interval,
+        weekdays=payload.weekdays or "",
+        month_mode=payload.month_mode,
+        max_occurrences=payload.max_occurrences,
         timezone=payload.timezone,
         series_start_date=payload.series_start_date,
         series_end_date=payload.series_end_date,
@@ -776,6 +780,14 @@ def update_recurring_plan(plan_id: int, payload: schemas.RecurringPlanUpdate, db
     if time.fromisoformat(new_end) <= time.fromisoformat(new_start):
         raise HTTPException(status_code=422, detail="end_time_of_day must be after start_time_of_day")
 
+    new_frequency = payload.frequency or plan.frequency
+    new_weekdays = payload.weekdays or plan.weekdays
+    new_month_mode = payload.month_mode or plan.month_mode
+    if new_frequency == "weekly" and not new_weekdays:
+        raise HTTPException(status_code=422, detail="weekly frequency requires weekdays")
+    if new_frequency == "monthly" and new_month_mode is None:
+        new_month_mode = "day_of_month"
+
     today_local = datetime.now(ZoneInfo(plan.timezone)).date()
     recurrence.delete_future_occurrences(db, plan, today_local)
 
@@ -784,7 +796,12 @@ def update_recurring_plan(plan_id: int, payload: schemas.RecurringPlanUpdate, db
     plan.name = payload.name if "name" in payload.model_fields_set else plan.name
     plan.start_time_of_day = new_start
     plan.end_time_of_day = new_end
-    plan.weekdays = payload.weekdays or plan.weekdays
+    plan.frequency = new_frequency
+    plan.interval = payload.interval or plan.interval
+    plan.weekdays = new_weekdays
+    plan.month_mode = new_month_mode
+    if "max_occurrences" in payload.model_fields_set:
+        plan.max_occurrences = payload.max_occurrences
     if "series_end_date" in payload.model_fields_set:
         plan.series_end_date = payload.series_end_date
     db.commit()
@@ -849,6 +866,14 @@ def split_recurrence_from(
 
     _validate_recurring_plan_refs(db, payload.project_id, payload.subtask_id)
 
+    new_frequency = payload.frequency or old_plan.frequency
+    new_weekdays = payload.weekdays or old_plan.weekdays
+    new_month_mode = payload.month_mode or old_plan.month_mode
+    if new_frequency == "weekly" and not new_weekdays:
+        raise HTTPException(status_code=422, detail="weekly frequency requires weekdays")
+    if new_frequency == "monthly" and new_month_mode is None:
+        new_month_mode = "day_of_month"
+
     occurrence_date = entry.start_time.astimezone(ZoneInfo(old_plan.timezone)).date()
     old_plan.series_end_date = occurrence_date - timedelta(days=1)
     recurrence.delete_future_occurrences(db, old_plan, occurrence_date)
@@ -859,7 +884,11 @@ def split_recurrence_from(
         name=payload.name,
         start_time_of_day=payload.start_time_of_day,
         end_time_of_day=payload.end_time_of_day,
-        weekdays=payload.weekdays or old_plan.weekdays,
+        frequency=new_frequency,
+        interval=payload.interval or old_plan.interval,
+        weekdays=new_weekdays,
+        month_mode=new_month_mode,
+        max_occurrences=payload.max_occurrences if payload.max_occurrences is not None else old_plan.max_occurrences,
         timezone=old_plan.timezone,
         series_start_date=occurrence_date,
         series_end_date=payload.series_end_date,

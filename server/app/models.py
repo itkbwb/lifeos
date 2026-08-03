@@ -142,8 +142,23 @@ class RecurringPlan(Base):
     name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     start_time_of_day: Mapped[str] = mapped_column(String, nullable=False)  # "HH:MM"
     end_time_of_day: Mapped[str] = mapped_column(String, nullable=False)  # "HH:MM"
-    # Comma-separated ISO weekday numbers (Mon=1..Sun=7), e.g. "1,2,3,4,5" for weekdays.
-    weekdays: Mapped[str] = mapped_column(String, nullable=False)
+    # "daily" | "weekly" | "monthly" | "yearly" - a simplified RRULE, matching the presets
+    # Google Calendar's own recurrence picker exposes (not arbitrary RFC 5545).
+    frequency: Mapped[str] = mapped_column(String, nullable=False, default="weekly")
+    # "every N {frequency}" - e.g. frequency=weekly, interval=2, weekdays="1" = every other
+    # Monday.
+    interval: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Comma-separated ISO weekday numbers (Mon=1..Sun=7, e.g. "1,2,3,4,5" for weekdays) - only
+    # meaningful when frequency="weekly"; empty string ("", not NULL - see chapter: recurring
+    # plans, keeping this column NOT NULL avoids an ALTER COLUMN on SQLite) otherwise.
+    weekdays: Mapped[str] = mapped_column(String, nullable=False, default="")
+    # "day_of_month" (same day-of-month as series_start_date every N months) or
+    # "weekday_of_month" (same "Nth weekday" as series_start_date, e.g. "the third Monday",
+    # matching Google Calendar's monthly options) - only meaningful when frequency="monthly".
+    month_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # "After N occurrences" end condition (chapter: recurring plans) - independent of
+    # series_end_date ("until date"); both may be set, whichever is reached first wins.
+    max_occurrences: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     timezone: Mapped[str] = mapped_column(String, nullable=False)
     series_start_date: Mapped[date_] = mapped_column(Date, nullable=False)
     # None = open-ended, capped only by the rolling generation window - not "forever" in

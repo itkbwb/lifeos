@@ -213,3 +213,161 @@ def test_delete_all_removes_future_but_keeps_past_history(client):
     assert all_entries[0]["recurring_plan_id"] is None  # detached, not destroyed
 
     assert client.get("/api/recurring-plans").json() == []
+
+
+def _create_plan(client, project_id, **overrides):
+    payload = {
+        "project_id": project_id,
+        "start_time_of_day": "09:00",
+        "end_time_of_day": "09:30",
+        "timezone": "UTC",
+        "series_start_date": date.today().isoformat(),
+    }
+    payload.update(overrides)
+    resp = client.post("/api/recurring-plans", json=payload)
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_daily_frequency_respects_interval(client):
+    project = _make_project(client)
+    today = date.today()
+    plan = _create_plan(client, project["id"], frequency="daily", interval=3)
+    entries = _recurring_entries(client, project["id"], plan["id"])
+    assert entries
+    for e in entries:
+        d = date.fromisoformat(e["start_time"][:10])
+        assert (d - today).days % 3 == 0
+
+
+def test_weekly_frequency_respects_interval(client):
+    project = _make_project(client)
+    today = date.today()
+    plan = _create_plan(
+        client, project["id"], frequency="weekly", interval=2, weekdays=str(today.isoweekday()),
+    )
+    entries = _recurring_entries(client, project["id"], plan["id"])
+    assert entries
+    week_start_of_series = today - timedelta(days=today.isoweekday() - 1)
+    for e in entries:
+        d = date.fromisoformat(e["start_time"][:10])
+        assert d.isoweekday() == today.isoweekday()
+        week_start_of_d = d - timedelta(days=d.isoweekday() - 1)
+        assert (week_start_of_d - week_start_of_series).days // 7 % 2 == 0
+
+
+def test_monthly_day_of_month(client):
+    project = _make_project(client)
+    today = date.today()
+    plan = _create_plan(client, project["id"], frequency="monthly", month_mode="day_of_month")
+    entries = _recurring_entries(client, project["id"], plan["id"])
+    assert entries  # today itself always matches its own day-of-month
+    for e in entries:
+        d = date.fromisoformat(e["start_time"][:10])
+        assert d.day == today.day
+
+
+def test_monthly_weekday_of_month(client):
+    project = _make_project(client)
+    today = date.today()
+    plan = _create_plan(client, project["id"], frequency="monthly", month_mode="weekday_of_month")
+    entries = _recurring_entries(client, project["id"], plan["id"])
+    assert entries
+    for e in entries:
+        d = date.fromisoformat(e["start_time"][:10])
+        assert d.isoweekday() == today.isoweekday()
+        # Same ordinal-in-month occurrence of that weekday as `today`.
+        assert (d.day - 1) // 7 == (today.day - 1) // 7
+
+
+def test_yearly_frequency(client):
+    project = _make_project(client)
+    today = date.today()
+    plan = _create_plan(client, project["id"], frequency="yearly")
+    entries = _recurring_entries(client, project["id"], plan["id"])
+    assert entries
+    for e in entries:
+        d = date.fromisoformat(e["start_time"][:10])
+        assert (d.month, d.day) == (today.month, today.day)
+
+
+def test_max_occurrences_caps_total_regardless_of_horizon(client):
+    project = _make_project(client)
+    plan = _create_plan(client, project["id"], frequency="daily", weekdays=None, max_occurrences=5)
+    entries = _recurring_entries(client, project["id"], plan["id"])
+    assert len(entries) == 5
+
+
+def test_weekly_without_weekdays_rejected(client):
+    project = _make_project(client)
+    resp = client.post(
+        "/api/recurring-plans",
+        json={
+            "project_id": project["id"],
+            "start_time_of_day": "09:00",
+            "end_time_of_day": "09:30",
+            "frequency": "weekly",
+            "timezone": "UTC",
+            "series_start_date": date.today().isoformat(),
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_monthly_defaults_month_mode_to_day_of_month(client):
+    project = _make_project(client)
+    plan = _create_plan(client, project["id"], frequency="monthly")
+    assert plan["month_mode"] == "day_of_month"
+
+
+def test_update_all_can_change_frequency_and_regenerate(client):
+    project = _make_project(client)
+    plan = _create_daily(client, project["id"])  # weekly, every day of week
+
+    resp = client.patch(
+        f"/api/recurring-plans/{plan['id']}",
+        json={"frequency": "daily", "interval": 1, "weekdays": None},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["frequency"] == "daily"
+
+    entries_after = _recurring_entries(client, project["id"], plan["id"])
+    assert len(entries_after) == 30
+
+
+def test_update_all_can_clear_max_occurrences(client):
+    project = _make_project(client)
+    plan = _create_plan(client, project["id"], frequency="daily", weekdays=None, max_occurrences=3)
+    assert len(_recurring_entries(client, project["id"], plan["id"])) == 3
+
+    resp = client.patch(f"/api/recurring-plans/{plan['id']}", json={"max_occurrences": None})
+    assert resp.status_code == 200
+    assert resp.json()["max_occurrences"] is None
+
+    entries_after = _recurring_entries(client, project["id"], plan["id"])
+    assert len(entries_after) == 30
+
+
+def test_split_recurrence_inherits_frequency_and_max_occurrences(client):
+    project = _make_project(client)
+    plan = _create_plan(client, project["id"], frequency="daily", weekdays=None, max_occurrences=15)
+    entries = _recurring_entries(client, project["id"], plan["id"])
+    split_point = entries[5]
+
+    resp = client.post(
+        f"/api/plan/entries/{split_point['id']}/recurrence/split",
+        json={
+            "project_id": project["id"],
+            "start_time_of_day": "08:00",
+            "end_time_of_day": "08:15",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    new_plan = resp.json()
+    assert new_plan["frequency"] == "daily"
+    # The new series gets its own fresh 15-occurrence budget starting from the split point,
+    # not "whatever quota remained" - same as weekdays/frequency being inherited as an
+    # independent copy of the pattern rather than a continuation.
+    assert new_plan["max_occurrences"] == 15
+    new_entries = _recurring_entries(client, project["id"], new_plan["id"])
+    assert len(new_entries) == 15

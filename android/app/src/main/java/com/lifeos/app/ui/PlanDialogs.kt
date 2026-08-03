@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -116,23 +118,101 @@ internal fun SubtaskPicker(subtasks: List<Subtask>, selectedId: Int?, onSelect: 
 }
 
 private val WEEKDAY_SHORT_LABELS = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс") // index0=Mon(ISO 1)..index6=Sun(ISO 7)
+private val WEEKDAY_FULL_LABELS = listOf(
+    "понедельник", "вторник", "среду", "четверг", "пятницу", "субботу", "воскресенье",
+)
+
+enum class RecurrenceFrequency(val unitLabel: String) {
+    Daily("День"),
+    Weekly("Неделя"),
+    Monthly("Месяц"),
+    Yearly("Год"),
+}
+
+enum class MonthMode { DayOfMonth, WeekdayOfMonth }
+
+/** How a [RecurrenceConfig] stops - mirrors Google Calendar's "Никогда / До даты / После N
+ * повторений" end-condition choice. */
+sealed class RecurrenceEnd {
+    object Never : RecurrenceEnd()
+    data class OnDate(val date: LocalDate) : RecurrenceEnd()
+    data class AfterCount(val count: Int) : RecurrenceEnd()
+}
 
 /**
- * Repeat picker for [StaticPlanFormDialog] (chapter: recurring plans). Preset chips
- * (не повторять/каждый день/по будням/по выходным) just pre-fill the per-weekday toggle row
- * below them - that row stays editable regardless of which preset was tapped, so "каждый день,
- * кроме среды" is one extra tap away rather than needing a 5th preset.
+ * A simplified RRULE (chapter: recurring plans) matching the presets Google Calendar's own
+ * recurrence picker exposes - not arbitrary RFC 5545. `null` (not a field here, but how callers
+ * represent it) means "does not repeat".
+ */
+data class RecurrenceConfig(
+    val frequency: RecurrenceFrequency = RecurrenceFrequency.Weekly,
+    val interval: Int = 1,
+    val weekdays: Set<Int> = emptySet(),
+    val monthMode: MonthMode = MonthMode.DayOfMonth,
+    val end: RecurrenceEnd = RecurrenceEnd.Never,
+)
+
+/** The server-shaped fields a [RecurrenceConfig] maps to - see [ApiFactory.createRecurringPlan]/
+ * [ApiFactory.splitRecurrence], which take these as separate params rather than this type
+ * directly (data/ layer stays free of ui/ types). */
+data class RecurrenceApiParams(
+    val frequency: String,
+    val interval: Int,
+    val weekdays: String?,
+    val monthMode: String?,
+    val seriesEndDate: String?,
+    val maxOccurrences: Int?,
+)
+
+fun RecurrenceConfig.toApiParams(): RecurrenceApiParams = RecurrenceApiParams(
+    frequency = when (frequency) {
+        RecurrenceFrequency.Daily -> "daily"
+        RecurrenceFrequency.Weekly -> "weekly"
+        RecurrenceFrequency.Monthly -> "monthly"
+        RecurrenceFrequency.Yearly -> "yearly"
+    },
+    interval = interval,
+    weekdays = if (frequency == RecurrenceFrequency.Weekly) weekdays.sorted().joinToString(",") else null,
+    monthMode = if (frequency == RecurrenceFrequency.Monthly) {
+        when (monthMode) {
+            MonthMode.DayOfMonth -> "day_of_month"
+            MonthMode.WeekdayOfMonth -> "weekday_of_month"
+        }
+    } else {
+        null
+    },
+    seriesEndDate = (end as? RecurrenceEnd.OnDate)?.date?.toString(),
+    maxOccurrences = (end as? RecurrenceEnd.AfterCount)?.count,
+)
+
+private fun dayOfMonthLabel(date: LocalDate): String = "${date.dayOfMonth}-го числа"
+
+private fun weekdayOfMonthLabel(date: LocalDate): String {
+    val ordinalWords = listOf("Первый", "Второй", "Третий", "Четвёртый", "Пятый")
+    val dayName = WEEKDAY_FULL_LABELS[date.dayOfWeek.value - 1]
+    val isLast = date.dayOfMonth + 7 > date.lengthOfMonth()
+    val ordinal = if (isLast) "Последний" else ordinalWords[(date.dayOfMonth - 1) / 7]
+    return "$ordinal $dayName"
+}
+
+/**
+ * Full recurrence editor for [StaticPlanFormDialog] (chapter: recurring plans) - quick preset
+ * chips (не повторять/каждый день/по будням/по выходным) for the common case, plus "Другое"
+ * revealing a Google-Calendar-style custom editor (every N days/weeks/months/years, weekday
+ * toggles or monthly mode, and an end condition) for everything else.
  */
 @Composable
-private fun RepeatPicker(
-    selectedWeekdays: Set<Int>,
-    onWeekdaysChange: (Set<Int>) -> Unit,
-    seriesEndText: String,
-    onSeriesEndChange: (String) -> Unit,
+private fun RecurrenceEditor(
+    referenceDate: LocalDate,
+    config: RecurrenceConfig?,
+    onConfigChange: (RecurrenceConfig?) -> Unit,
 ) {
-    val everyDay = (1..7).toSet()
-    val weekdaysOnly = (1..5).toSet()
-    val weekendOnly = setOf(6, 7)
+    val weekdaysOnlyPreset = RecurrenceConfig(RecurrenceFrequency.Weekly, 1, (1..5).toSet())
+    val weekendPreset = RecurrenceConfig(RecurrenceFrequency.Weekly, 1, setOf(6, 7))
+    val dailyPreset = RecurrenceConfig(RecurrenceFrequency.Daily, 1)
+    val isKnownPreset = config == null || config == dailyPreset || config == weekdaysOnlyPreset || config == weekendPreset
+    var customExpanded by remember { mutableStateOf(config != null && !isKnownPreset) }
+
     Column {
         Text("Повтор", style = MaterialTheme.typography.labelMedium)
         Spacer(Modifier.height(8.dp))
@@ -140,49 +220,188 @@ private fun RepeatPicker(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            RepeatChip("Не повторять", selectedWeekdays.isEmpty()) { onWeekdaysChange(emptySet()) }
-            RepeatChip("Каждый день", selectedWeekdays == everyDay) { onWeekdaysChange(everyDay) }
-            RepeatChip("По будням", selectedWeekdays == weekdaysOnly) { onWeekdaysChange(weekdaysOnly) }
-            RepeatChip("По выходным", selectedWeekdays == weekendOnly) { onWeekdaysChange(weekendOnly) }
+            RepeatChip("Не повторять", config == null && !customExpanded) {
+                customExpanded = false
+                onConfigChange(null)
+            }
+            RepeatChip("Каждый день", config == dailyPreset && !customExpanded) {
+                customExpanded = false
+                onConfigChange(dailyPreset)
+            }
+            RepeatChip("По будням", config == weekdaysOnlyPreset && !customExpanded) {
+                customExpanded = false
+                onConfigChange(weekdaysOnlyPreset)
+            }
+            RepeatChip("По выходным", config == weekendPreset && !customExpanded) {
+                customExpanded = false
+                onConfigChange(weekendPreset)
+            }
+            RepeatChip("Другое", customExpanded) {
+                customExpanded = true
+                if (config == null) {
+                    onConfigChange(RecurrenceConfig(weekdays = setOf(referenceDate.dayOfWeek.value)))
+                }
+            }
         }
-        if (selectedWeekdays.isNotEmpty()) {
+        if (customExpanded) {
+            val current = config ?: RecurrenceConfig(weekdays = setOf(referenceDate.dayOfWeek.value))
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Каждые", style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    value = current.interval.toString(),
+                    onValueChange = { text ->
+                        val n = text.toIntOrNull()
+                        if (n != null && n >= 1) onConfigChange(current.copy(interval = n))
+                    },
+                    modifier = Modifier.width(72.dp),
+                    singleLine = true,
+                )
+            }
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                WEEKDAY_SHORT_LABELS.forEachIndexed { index, label ->
-                    val iso = index + 1
-                    val isOn = iso in selectedWeekdays
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(
-                                if (isOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                            )
-                            .clickable {
-                                onWeekdaysChange(if (isOn) selectedWeekdays - iso else selectedWeekdays + iso)
-                            }
-                            .size(32.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            label,
-                            fontSize = 11.sp,
-                            color = if (isOn) {
-                                MaterialTheme.colorScheme.onPrimary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                RecurrenceFrequency.entries.forEach { freq ->
+                    RepeatChip(freq.unitLabel, current.frequency == freq) {
+                        val withWeekdays = if (freq == RecurrenceFrequency.Weekly && current.weekdays.isEmpty()) {
+                            setOf(referenceDate.dayOfWeek.value)
+                        } else {
+                            current.weekdays
+                        }
+                        onConfigChange(current.copy(frequency = freq, weekdays = withWeekdays))
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = seriesEndText,
-                onValueChange = onSeriesEndChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("До какой даты") },
-                placeholder = { Text("Не ограничено") },
-            )
+            if (current.frequency == RecurrenceFrequency.Weekly) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    WEEKDAY_SHORT_LABELS.forEachIndexed { index, label ->
+                        val iso = index + 1
+                        val isOn = iso in current.weekdays
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(
+                                    if (isOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                )
+                                .clickable {
+                                    val next = if (isOn) current.weekdays - iso else current.weekdays + iso
+                                    onConfigChange(current.copy(weekdays = next))
+                                }
+                                .size(32.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                label,
+                                fontSize = 11.sp,
+                                color = if (isOn) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            if (current.frequency == RecurrenceFrequency.Monthly) {
+                Spacer(Modifier.height(8.dp))
+                Column {
+                    listOf(
+                        MonthMode.DayOfMonth to dayOfMonthLabel(referenceDate),
+                        MonthMode.WeekdayOfMonth to weekdayOfMonthLabel(referenceDate),
+                    ).forEach { (mode, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onConfigChange(current.copy(monthMode = mode)) },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = current.monthMode == mode, onClick = { onConfigChange(current.copy(monthMode = mode)) })
+                            Text(label)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("Окончание", style = MaterialTheme.typography.labelMedium)
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { onConfigChange(current.copy(end = RecurrenceEnd.Never)) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = current.end is RecurrenceEnd.Never,
+                        onClick = { onConfigChange(current.copy(end = RecurrenceEnd.Never)) },
+                    )
+                    Text("Никогда")
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val date = (current.end as? RecurrenceEnd.OnDate)?.date ?: referenceDate.plusMonths(1)
+                            onConfigChange(current.copy(end = RecurrenceEnd.OnDate(date)))
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = current.end is RecurrenceEnd.OnDate,
+                        onClick = {
+                            val date = (current.end as? RecurrenceEnd.OnDate)?.date ?: referenceDate.plusMonths(1)
+                            onConfigChange(current.copy(end = RecurrenceEnd.OnDate(date)))
+                        },
+                    )
+                    Text("До даты")
+                    if (current.end is RecurrenceEnd.OnDate) {
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = PLAN_DATE_FORMAT.format(current.end.date),
+                            onValueChange = { text ->
+                                runCatching { LocalDate.parse(text, PLAN_DATE_FORMAT) }.getOrNull()?.let {
+                                    onConfigChange(current.copy(end = RecurrenceEnd.OnDate(it)))
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val count = (current.end as? RecurrenceEnd.AfterCount)?.count ?: 10
+                            onConfigChange(current.copy(end = RecurrenceEnd.AfterCount(count)))
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = current.end is RecurrenceEnd.AfterCount,
+                        onClick = {
+                            val count = (current.end as? RecurrenceEnd.AfterCount)?.count ?: 10
+                            onConfigChange(current.copy(end = RecurrenceEnd.AfterCount(count)))
+                        },
+                    )
+                    Text("После")
+                    if (current.end is RecurrenceEnd.AfterCount) {
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = current.end.count.toString(),
+                            onValueChange = { text ->
+                                val n = text.toIntOrNull()
+                                if (n != null && n >= 1) onConfigChange(current.copy(end = RecurrenceEnd.AfterCount(n)))
+                            },
+                            modifier = Modifier.width(64.dp),
+                            singleLine = true,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("раз")
+                    }
+                }
+            }
         }
     }
 }
@@ -201,11 +420,14 @@ private fun RepeatChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * Creates a Static Plan entry (chapter 4.5/4.6) for a fixed day: pick a project (required -
- * a plan cannot exist without one) and a start/end time. The entry is immutable once
- * created; rescheduling later goes through a PlanChange, not this dialog.
+ * Creates a Static Plan entry (chapter 4.5/4.6): pick a project (required - a plan cannot
+ * exist without one), a date, and a start/end time. The entry is immutable once created;
+ * rescheduling later goes through a PlanChange, not this dialog. Reusable from both the
+ * calendar "+" (project fixed to whichever day is selected) and a subtask's own list (chapter:
+ * recurring plans - "planning a task directly from its list"), where [initialSubtaskId] and
+ * [initialName] pre-fill from the tapped task and [projects] is typically just that one project.
  *
- * Optionally repeating (chapter: recurring plans) - picking any weekday in [RepeatPicker]
+ * Optionally repeating - configuring anything other than "Не повторять" in [RecurrenceEditor]
  * switches the confirm action from [onConfirm] (a single entry) to [onConfirmRecurring] (a
  * RecurringPlan template, materialized server-side on a rolling window rather than planned
  * into infinity).
@@ -217,26 +439,36 @@ fun StaticPlanFormDialog(
     serverUrl: String,
     accessClientId: String = "",
     accessClientSecret: String = "",
+    initialDate: LocalDate = LocalDate.now(),
+    initialName: String = "",
+    initialSubtaskId: Int? = null,
     onDismiss: () -> Unit,
-    onConfirm: (projectId: Int, startTime: LocalTime, endTime: LocalTime, name: String?, subtaskId: Int?) -> Unit,
-    onConfirmRecurring: (
+    onConfirm: (
         projectId: Int,
+        date: LocalDate,
         startTime: LocalTime,
         endTime: LocalTime,
         name: String?,
         subtaskId: Int?,
-        weekdays: Set<Int>,
-        seriesEndDate: LocalDate?,
+    ) -> Unit,
+    onConfirmRecurring: (
+        projectId: Int,
+        date: LocalDate,
+        startTime: LocalTime,
+        endTime: LocalTime,
+        name: String?,
+        subtaskId: Int?,
+        recurrence: RecurrenceConfig,
     ) -> Unit,
 ) {
     var selectedProjectId by remember { mutableStateOf(projects.firstOrNull()?.id) }
+    var dateText by remember { mutableStateOf(PLAN_DATE_FORMAT.format(initialDate)) }
     var startText by remember { mutableStateOf("09:00") }
     var endText by remember { mutableStateOf("10:00") }
-    var name by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
     var subtasks by remember { mutableStateOf<List<Subtask>>(emptyList()) }
-    var selectedSubtaskId by remember { mutableStateOf<Int?>(null) }
-    var selectedWeekdays by remember { mutableStateOf<Set<Int>>(emptySet()) }
-    var seriesEndText by remember { mutableStateOf("") }
+    var selectedSubtaskId by remember { mutableStateOf(initialSubtaskId) }
+    var recurrenceConfig by remember { mutableStateOf<RecurrenceConfig?>(null) }
 
     LaunchedEffect(selectedProjectId, serverUrl) {
         val projectId = selectedProjectId
@@ -250,12 +482,14 @@ fun StaticPlanFormDialog(
         if (subtasks.none { it.id == selectedSubtaskId }) selectedSubtaskId = null
     }
 
+    val date = runCatching { LocalDate.parse(dateText, PLAN_DATE_FORMAT) }.getOrNull()
     val startTime = runCatching { LocalTime.parse(startText) }.getOrNull()
     val endTime = runCatching { LocalTime.parse(endText) }.getOrNull()
-    val seriesEndDate = seriesEndText.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-    val seriesEndValid = seriesEndText.isBlank() || seriesEndDate != null
-    val isValid = selectedProjectId != null && startTime != null && endTime != null &&
-        endTime > startTime && seriesEndValid
+    val recurrenceValid = recurrenceConfig?.let { cfg ->
+        cfg.frequency != RecurrenceFrequency.Weekly || cfg.weekdays.isNotEmpty()
+    } ?: true
+    val isValid = selectedProjectId != null && date != null && startTime != null && endTime != null &&
+        endTime > startTime && recurrenceValid
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -270,6 +504,14 @@ fun StaticPlanFormDialog(
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Название") },
                     placeholder = { Text("Необязательно") },
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = dateText,
+                    onValueChange = { dateText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Дата") },
+                    placeholder = { Text("2026-08-01") },
                 )
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -293,11 +535,10 @@ fun StaticPlanFormDialog(
                     SubtaskPicker(subtasks, selectedSubtaskId, onSelect = { selectedSubtaskId = it })
                 }
                 Spacer(Modifier.height(16.dp))
-                RepeatPicker(
-                    selectedWeekdays = selectedWeekdays,
-                    onWeekdaysChange = { selectedWeekdays = it },
-                    seriesEndText = seriesEndText,
-                    onSeriesEndChange = { seriesEndText = it },
+                RecurrenceEditor(
+                    referenceDate = date ?: initialDate,
+                    config = recurrenceConfig,
+                    onConfigChange = { recurrenceConfig = it },
                 )
                 if (errorMessage.isNotBlank()) {
                     Spacer(Modifier.height(12.dp))
@@ -308,18 +549,18 @@ fun StaticPlanFormDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (selectedWeekdays.isEmpty()) {
-                        onConfirm(selectedProjectId!!, startTime!!, endTime!!, name.ifBlank { null }, selectedSubtaskId)
+                    val cfg = recurrenceConfig
+                    if (cfg == null) {
+                        onConfirm(selectedProjectId!!, date!!, startTime!!, endTime!!, name.ifBlank { null }, selectedSubtaskId)
                     } else {
                         onConfirmRecurring(
-                            selectedProjectId!!, startTime!!, endTime!!, name.ifBlank { null }, selectedSubtaskId,
-                            selectedWeekdays, seriesEndDate,
+                            selectedProjectId!!, date!!, startTime!!, endTime!!, name.ifBlank { null }, selectedSubtaskId, cfg,
                         )
                     }
                 },
                 enabled = isValid,
             ) {
-                Text(if (selectedWeekdays.isEmpty()) "Запланировать" else "Добавить повтор")
+                Text(if (recurrenceConfig == null) "Запланировать" else "Добавить повтор")
             }
         },
         dismissButton = {
