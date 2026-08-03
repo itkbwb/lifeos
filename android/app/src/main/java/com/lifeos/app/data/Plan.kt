@@ -8,6 +8,27 @@ data class PlanEntry(
     val name: String?,
     val created_at: String,
     val subtask_id: Int? = null,
+    val recurring_plan_id: Int? = null,
+)
+
+/**
+ * A recurring Static Plan template (chapter: recurring plans) - materializes into normal
+ * PlanEntry rows on a rolling ~30-day window server-side (app/recurrence.py), same as this app
+ * never plans anything into infinity. `weekdays` is a comma-separated ISO weekday list
+ * (Mon=1..Sun=7, e.g. "1,2,3,4,5" for weekdays).
+ */
+data class RecurringPlan(
+    val id: Int,
+    val project_id: Int,
+    val subtask_id: Int?,
+    val name: String?,
+    val start_time_of_day: String,
+    val end_time_of_day: String,
+    val weekdays: String,
+    val timezone: String,
+    val series_start_date: String,
+    val series_end_date: String?,
+    val created_at: String,
 )
 
 data class DynamicPlanEntry(

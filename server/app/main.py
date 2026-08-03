@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import models, schemas
+from app import models, recurrence, schemas
 from app import scheduler as notification_scheduler
 from app.database import Base, engine, ensure_schema_migrations, get_db
 
@@ -696,8 +697,178 @@ def delete_plan_entry(entry_id: int, db: Session = Depends(get_db)):
     entry = db.get(models.PlanEntry, entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Plan entry not found")
+
+    # "This occurrence only" (chapter: recurring plans) - record an exception so the next
+    # generation pass doesn't recreate the very entry the user just removed.
+    if entry.recurring_plan_id is not None:
+        plan = db.get(models.RecurringPlan, entry.recurring_plan_id)
+        if plan is not None:
+            occurrence_date = entry.start_time.astimezone(ZoneInfo(plan.timezone)).date()
+            already_excluded = (
+                db.query(models.RecurringPlanException)
+                .filter(
+                    models.RecurringPlanException.recurring_plan_id == plan.id,
+                    models.RecurringPlanException.date == occurrence_date,
+                )
+                .first()
+            )
+            if already_excluded is None:
+                db.add(models.RecurringPlanException(recurring_plan_id=plan.id, date=occurrence_date))
+
     db.delete(entry)
     db.commit()
+
+
+def _validate_recurring_plan_refs(db: Session, project_id: int, subtask_id: Optional[int]) -> None:
+    if db.get(models.Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if subtask_id is not None:
+        subtask = db.get(models.Subtask, subtask_id)
+        if subtask is None or subtask.project_id != project_id:
+            raise HTTPException(status_code=422, detail="subtask_id must belong to project_id")
+
+
+@app.post("/api/recurring-plans", response_model=schemas.RecurringPlanOut, status_code=201)
+def create_recurring_plan(payload: schemas.RecurringPlanCreate, db: Session = Depends(get_db)):
+    _validate_recurring_plan_refs(db, payload.project_id, payload.subtask_id)
+
+    plan = models.RecurringPlan(
+        project_id=payload.project_id,
+        subtask_id=payload.subtask_id,
+        name=payload.name,
+        start_time_of_day=payload.start_time_of_day,
+        end_time_of_day=payload.end_time_of_day,
+        weekdays=payload.weekdays,
+        timezone=payload.timezone,
+        series_start_date=payload.series_start_date,
+        series_end_date=payload.series_end_date,
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    recurrence.generate_occurrences(db, plan)
+    return plan
+
+
+@app.get("/api/recurring-plans", response_model=list[schemas.RecurringPlanOut])
+def list_recurring_plans(project_id: Optional[int] = None, db: Session = Depends(get_db)):
+    query = db.query(models.RecurringPlan)
+    if project_id is not None:
+        query = query.filter(models.RecurringPlan.project_id == project_id)
+    return query.order_by(models.RecurringPlan.created_at.asc()).all()
+
+
+@app.patch("/api/recurring-plans/{plan_id}", response_model=schemas.RecurringPlanOut)
+def update_recurring_plan(plan_id: int, payload: schemas.RecurringPlanUpdate, db: Session = Depends(get_db)):
+    """"All occurrences" edit (chapter: recurring plans) - updates the series template, then
+    regenerates today-forward occurrences under the new values. Already-past occurrences are
+    left untouched (they're historical Static Plan records, not the live template)."""
+    plan = db.get(models.RecurringPlan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Recurring plan not found")
+
+    new_project_id = payload.project_id if payload.project_id is not None else plan.project_id
+    new_subtask_id = payload.subtask_id if "subtask_id" in payload.model_fields_set else plan.subtask_id
+    _validate_recurring_plan_refs(db, new_project_id, new_subtask_id)
+
+    new_start = payload.start_time_of_day or plan.start_time_of_day
+    new_end = payload.end_time_of_day or plan.end_time_of_day
+    if time.fromisoformat(new_end) <= time.fromisoformat(new_start):
+        raise HTTPException(status_code=422, detail="end_time_of_day must be after start_time_of_day")
+
+    today_local = datetime.now(ZoneInfo(plan.timezone)).date()
+    recurrence.delete_future_occurrences(db, plan, today_local)
+
+    plan.project_id = new_project_id
+    plan.subtask_id = new_subtask_id
+    plan.name = payload.name if "name" in payload.model_fields_set else plan.name
+    plan.start_time_of_day = new_start
+    plan.end_time_of_day = new_end
+    plan.weekdays = payload.weekdays or plan.weekdays
+    if "series_end_date" in payload.model_fields_set:
+        plan.series_end_date = payload.series_end_date
+    db.commit()
+    db.refresh(plan)
+    recurrence.generate_occurrences(db, plan)
+    return plan
+
+
+@app.delete("/api/recurring-plans/{plan_id}", status_code=204)
+def delete_recurring_plan(plan_id: int, db: Session = Depends(get_db)):
+    """"All occurrences" delete (chapter: recurring plans) - removes today-forward
+    materialized occurrences; past ones are detached (recurring_plan_id -> NULL via the FK's
+    ON DELETE SET NULL) rather than destroyed, consistent with Static Plan history never being
+    silently deleted."""
+    plan = db.get(models.RecurringPlan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Recurring plan not found")
+    today_local = datetime.now(ZoneInfo(plan.timezone)).date()
+    recurrence.delete_future_occurrences(db, plan, today_local)
+    db.delete(plan)
+    db.commit()
+
+
+@app.post("/api/plan/entries/{entry_id}/recurrence/stop", status_code=204)
+def stop_recurrence_from(entry_id: int, db: Session = Depends(get_db)):
+    """"This and following" delete (chapter: recurring plans) - ends the series the day
+    before this occurrence and removes this plus any already-materialized later occurrences."""
+    entry = db.get(models.PlanEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Plan entry not found")
+    if entry.recurring_plan_id is None:
+        raise HTTPException(status_code=422, detail="Plan entry does not belong to a recurring plan")
+    plan = db.get(models.RecurringPlan, entry.recurring_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Recurring plan not found")
+
+    occurrence_date = entry.start_time.astimezone(ZoneInfo(plan.timezone)).date()
+    plan.series_end_date = occurrence_date - timedelta(days=1)
+    db.commit()
+    recurrence.delete_future_occurrences(db, plan, occurrence_date)
+
+
+@app.post(
+    "/api/plan/entries/{entry_id}/recurrence/split",
+    response_model=schemas.RecurringPlanOut,
+    status_code=201,
+)
+def split_recurrence_from(
+    entry_id: int, payload: schemas.RecurrenceSplitRequest, db: Session = Depends(get_db)
+):
+    """"This and following" edit (chapter: recurring plans) - ends the original series the day
+    before this occurrence and starts a brand new series (with the edited values) from this
+    occurrence's date onward, reusing the original series' timezone."""
+    entry = db.get(models.PlanEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Plan entry not found")
+    if entry.recurring_plan_id is None:
+        raise HTTPException(status_code=422, detail="Plan entry does not belong to a recurring plan")
+    old_plan = db.get(models.RecurringPlan, entry.recurring_plan_id)
+    if old_plan is None:
+        raise HTTPException(status_code=404, detail="Recurring plan not found")
+
+    _validate_recurring_plan_refs(db, payload.project_id, payload.subtask_id)
+
+    occurrence_date = entry.start_time.astimezone(ZoneInfo(old_plan.timezone)).date()
+    old_plan.series_end_date = occurrence_date - timedelta(days=1)
+    recurrence.delete_future_occurrences(db, old_plan, occurrence_date)
+
+    new_plan = models.RecurringPlan(
+        project_id=payload.project_id,
+        subtask_id=payload.subtask_id,
+        name=payload.name,
+        start_time_of_day=payload.start_time_of_day,
+        end_time_of_day=payload.end_time_of_day,
+        weekdays=payload.weekdays or old_plan.weekdays,
+        timezone=old_plan.timezone,
+        series_start_date=occurrence_date,
+        series_end_date=payload.series_end_date,
+    )
+    db.add(new_plan)
+    db.commit()
+    db.refresh(new_plan)
+    recurrence.generate_occurrences(db, new_plan)
+    return new_plan
 
 
 @app.post(

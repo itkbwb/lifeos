@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date as date_, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base, UTCDateTime
@@ -79,6 +79,13 @@ class PlanEntry(Base):
     subtask_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("subtasks.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Set only on entries materialized by a RecurringPlan (chapter: recurring plans).
+    # SET NULL (not CASCADE) so deleting the series definition never silently destroys
+    # already-materialized Static Plan history - each occurrence is a normal, independently
+    # editable/deletable Static entry once created.
+    recurring_plan_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("recurring_plans.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
@@ -108,6 +115,61 @@ class PlanChange(Base):
         nullable=False,
         index=True,
     )
+
+
+class RecurringPlan(Base):
+    """A recurring Static Plan template (chapter: recurring plans) - e.g. "Routine at
+    09:00-09:30 every weekday". Doesn't itself appear on the calendar; `app.recurrence`
+    materializes it into normal PlanEntry rows (linked via `PlanEntry.recurring_plan_id`)
+    on a rolling window (see GENERATION_HORIZON_DAYS), same as Google Calendar never
+    pre-generates occurrences into infinity.
+
+    Weekday math happens in `timezone` (an IANA name captured from the creating client),
+    not UTC - "every day" is a local-calendar concept, and this app has only ever had one
+    user/device, so a single stored zone per series is enough (unlike PlanEntry, which
+    stores resolved UTC instants once the local time is known).
+    """
+
+    __tablename__ = "recurring_plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    subtask_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("subtasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    start_time_of_day: Mapped[str] = mapped_column(String, nullable=False)  # "HH:MM"
+    end_time_of_day: Mapped[str] = mapped_column(String, nullable=False)  # "HH:MM"
+    # Comma-separated ISO weekday numbers (Mon=1..Sun=7), e.g. "1,2,3,4,5" for weekdays.
+    weekdays: Mapped[str] = mapped_column(String, nullable=False)
+    timezone: Mapped[str] = mapped_column(String, nullable=False)
+    series_start_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    # None = open-ended, capped only by the rolling generation window - not "forever" in
+    # the database, matching the "don't plan into infinity" requirement.
+    series_end_date: Mapped[Optional[date_]] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class RecurringPlanException(Base):
+    """A single date deliberately skipped from a RecurringPlan (chapter: recurring plans,
+    "this occurrence only" delete) - generation skips these dates instead of recreating
+    the PlanEntry that was just explicitly removed."""
+
+    __tablename__ = "recurring_plan_exceptions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recurring_plan_id: Mapped[int] = mapped_column(
+        ForeignKey("recurring_plans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    date: Mapped[date_] = mapped_column(Date, nullable=False)
+
+    __table_args__ = (UniqueConstraint("recurring_plan_id", "date"),)
 
 
 class Subtask(Base):

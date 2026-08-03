@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -25,9 +27,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.lifeos.app.data.ApiFactory
 import com.lifeos.app.data.DynamicPlanEntry
 import com.lifeos.app.data.PlanEntry
@@ -111,10 +115,100 @@ internal fun SubtaskPicker(subtasks: List<Subtask>, selectedId: Int?, onSelect: 
     }
 }
 
+private val WEEKDAY_SHORT_LABELS = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс") // index0=Mon(ISO 1)..index6=Sun(ISO 7)
+
+/**
+ * Repeat picker for [StaticPlanFormDialog] (chapter: recurring plans). Preset chips
+ * (не повторять/каждый день/по будням/по выходным) just pre-fill the per-weekday toggle row
+ * below them - that row stays editable regardless of which preset was tapped, so "каждый день,
+ * кроме среды" is one extra tap away rather than needing a 5th preset.
+ */
+@Composable
+private fun RepeatPicker(
+    selectedWeekdays: Set<Int>,
+    onWeekdaysChange: (Set<Int>) -> Unit,
+    seriesEndText: String,
+    onSeriesEndChange: (String) -> Unit,
+) {
+    val everyDay = (1..7).toSet()
+    val weekdaysOnly = (1..5).toSet()
+    val weekendOnly = setOf(6, 7)
+    Column {
+        Text("Повтор", style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RepeatChip("Не повторять", selectedWeekdays.isEmpty()) { onWeekdaysChange(emptySet()) }
+            RepeatChip("Каждый день", selectedWeekdays == everyDay) { onWeekdaysChange(everyDay) }
+            RepeatChip("По будням", selectedWeekdays == weekdaysOnly) { onWeekdaysChange(weekdaysOnly) }
+            RepeatChip("По выходным", selectedWeekdays == weekendOnly) { onWeekdaysChange(weekendOnly) }
+        }
+        if (selectedWeekdays.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                WEEKDAY_SHORT_LABELS.forEachIndexed { index, label ->
+                    val iso = index + 1
+                    val isOn = iso in selectedWeekdays
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(
+                                if (isOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            )
+                            .clickable {
+                                onWeekdaysChange(if (isOn) selectedWeekdays - iso else selectedWeekdays + iso)
+                            }
+                            .size(32.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            fontSize = 11.sp,
+                            color = if (isOn) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = seriesEndText,
+                onValueChange = onSeriesEndChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("До какой даты") },
+                placeholder = { Text("Не ограничено") },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RepeatChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(label, color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 /**
  * Creates a Static Plan entry (chapter 4.5/4.6) for a fixed day: pick a project (required -
  * a plan cannot exist without one) and a start/end time. The entry is immutable once
  * created; rescheduling later goes through a PlanChange, not this dialog.
+ *
+ * Optionally repeating (chapter: recurring plans) - picking any weekday in [RepeatPicker]
+ * switches the confirm action from [onConfirm] (a single entry) to [onConfirmRecurring] (a
+ * RecurringPlan template, materialized server-side on a rolling window rather than planned
+ * into infinity).
  */
 @Composable
 fun StaticPlanFormDialog(
@@ -125,6 +219,15 @@ fun StaticPlanFormDialog(
     accessClientSecret: String = "",
     onDismiss: () -> Unit,
     onConfirm: (projectId: Int, startTime: LocalTime, endTime: LocalTime, name: String?, subtaskId: Int?) -> Unit,
+    onConfirmRecurring: (
+        projectId: Int,
+        startTime: LocalTime,
+        endTime: LocalTime,
+        name: String?,
+        subtaskId: Int?,
+        weekdays: Set<Int>,
+        seriesEndDate: LocalDate?,
+    ) -> Unit,
 ) {
     var selectedProjectId by remember { mutableStateOf(projects.firstOrNull()?.id) }
     var startText by remember { mutableStateOf("09:00") }
@@ -132,6 +235,8 @@ fun StaticPlanFormDialog(
     var name by remember { mutableStateOf("") }
     var subtasks by remember { mutableStateOf<List<Subtask>>(emptyList()) }
     var selectedSubtaskId by remember { mutableStateOf<Int?>(null) }
+    var selectedWeekdays by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var seriesEndText by remember { mutableStateOf("") }
 
     LaunchedEffect(selectedProjectId, serverUrl) {
         val projectId = selectedProjectId
@@ -147,7 +252,10 @@ fun StaticPlanFormDialog(
 
     val startTime = runCatching { LocalTime.parse(startText) }.getOrNull()
     val endTime = runCatching { LocalTime.parse(endText) }.getOrNull()
-    val isValid = selectedProjectId != null && startTime != null && endTime != null && endTime > startTime
+    val seriesEndDate = seriesEndText.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    val seriesEndValid = seriesEndText.isBlank() || seriesEndDate != null
+    val isValid = selectedProjectId != null && startTime != null && endTime != null &&
+        endTime > startTime && seriesEndValid
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -184,6 +292,13 @@ fun StaticPlanFormDialog(
                     Spacer(Modifier.height(16.dp))
                     SubtaskPicker(subtasks, selectedSubtaskId, onSelect = { selectedSubtaskId = it })
                 }
+                Spacer(Modifier.height(16.dp))
+                RepeatPicker(
+                    selectedWeekdays = selectedWeekdays,
+                    onWeekdaysChange = { selectedWeekdays = it },
+                    seriesEndText = seriesEndText,
+                    onSeriesEndChange = { seriesEndText = it },
+                )
                 if (errorMessage.isNotBlank()) {
                     Spacer(Modifier.height(12.dp))
                     Text(errorMessage, color = MaterialTheme.colorScheme.error)
@@ -193,11 +308,18 @@ fun StaticPlanFormDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onConfirm(selectedProjectId!!, startTime!!, endTime!!, name.ifBlank { null }, selectedSubtaskId)
+                    if (selectedWeekdays.isEmpty()) {
+                        onConfirm(selectedProjectId!!, startTime!!, endTime!!, name.ifBlank { null }, selectedSubtaskId)
+                    } else {
+                        onConfirmRecurring(
+                            selectedProjectId!!, startTime!!, endTime!!, name.ifBlank { null }, selectedSubtaskId,
+                            selectedWeekdays, seriesEndDate,
+                        )
+                    }
                 },
                 enabled = isValid,
             ) {
-                Text("Запланировать")
+                Text(if (selectedWeekdays.isEmpty()) "Запланировать" else "Добавить повтор")
             }
         },
         dismissButton = {
@@ -653,6 +775,43 @@ fun InstantFormDialog(
                 enabled = isValid,
             ) { Text("Добавить") }
         },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+
+/**
+ * Google-Calendar-style "this / this and following / all" scope choice (chapter: recurring
+ * plans) - shown before actually saving/deleting an edit on a PlanEntry that belongs to a
+ * RecurringPlan, since which occurrences that edit/delete should apply to isn't otherwise
+ * unambiguous.
+ */
+@Composable
+fun RecurrenceScopeDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    onThisOnly: () -> Unit,
+    onThisAndFollowing: () -> Unit,
+    onAll: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                TextButton(onClick = onThisOnly, modifier = Modifier.fillMaxWidth()) {
+                    Text("Только этот день", modifier = Modifier.fillMaxWidth())
+                }
+                TextButton(onClick = onThisAndFollowing, modifier = Modifier.fillMaxWidth()) {
+                    Text("Этот и все следующие", modifier = Modifier.fillMaxWidth())
+                }
+                TextButton(onClick = onAll, modifier = Modifier.fillMaxWidth()) {
+                    Text("Все", modifier = Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }
         },

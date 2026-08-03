@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -55,6 +56,7 @@ import com.lifeos.app.ui.ConfirmDeleteDialog
 import com.lifeos.app.ui.DynamicEntryEditDialog
 import com.lifeos.app.ui.EventEditDialog
 import com.lifeos.app.ui.PlanEntryEditDialog
+import com.lifeos.app.ui.RecurrenceScopeDialog
 import com.lifeos.app.ui.theme.ProjectColors
 import java.time.Instant
 import java.time.LocalDate
@@ -82,6 +84,24 @@ private sealed class DeleteTarget {
     data class EventTarget(val event: Event) : DeleteTarget()
     data class StaticTarget(val entry: PlanEntry) : DeleteTarget()
     data class DynamicTarget(val entry: DynamicPlanEntry) : DeleteTarget()
+}
+
+/**
+ * Pending save/delete on a PlanEntry that belongs to a RecurringPlan (chapter: recurring
+ * plans) - performing it needs a "this / this and following / all" scope choice first
+ * ([RecurrenceScopeDialog]), so the actual API call is deferred until that's answered.
+ */
+private sealed class RecurrenceScopePrompt {
+    data class ForSave(
+        val entry: PlanEntry,
+        val projectId: Int,
+        val start: Instant,
+        val end: Instant,
+        val name: String,
+        val subtaskId: Int?,
+    ) : RecurrenceScopePrompt()
+
+    data class ForDelete(val entry: PlanEntry) : RecurrenceScopePrompt()
 }
 
 /**
@@ -134,6 +154,7 @@ private fun DaySummaryContent(
     var editingStatic by remember { mutableStateOf<PlanEntry?>(null) }
     var editingDynamic by remember { mutableStateOf<DynamicPlanEntry?>(null) }
     var deleteTarget by remember { mutableStateOf<DeleteTarget?>(null) }
+    var recurrenceScopePrompt by remember { mutableStateOf<RecurrenceScopePrompt?>(null) }
     var saveError by remember { mutableStateOf("") }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -280,6 +301,37 @@ private fun DaySummaryContent(
         )
     }
 
+    fun saveStaticThisOnly(entry: PlanEntry, projectId: Int, start: Instant, end: Instant, name: String, subtaskId: Int?) {
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    ApiFactory.updatePlanEntry(
+                        serverUrl, accessClientId, accessClientSecret,
+                        id = entry.id, projectId = projectId,
+                        startTime = start.toString(), endTime = end.toString(), name = name,
+                        subtaskId = subtaskId, clearSubtask = subtaskId == null,
+                    )
+                }
+            }
+            result.onSuccess {
+                editingStatic = null
+                saveError = ""
+                refreshKey++
+                offerUndo(
+                    UndoAction("План изменён") {
+                        ApiFactory.updatePlanEntry(
+                            serverUrl, accessClientId, accessClientSecret,
+                            id = entry.id, projectId = entry.project_id,
+                            startTime = entry.start_time, endTime = entry.end_time,
+                            name = entry.name ?: "",
+                            subtaskId = entry.subtask_id, clearSubtask = entry.subtask_id == null,
+                        )
+                    },
+                )
+            }.onFailure { saveError = "Не удалось сохранить" }
+        }
+    }
+
     editingStatic?.let { entry ->
         PlanEntryEditDialog(
             entry = entry,
@@ -290,35 +342,18 @@ private fun DaySummaryContent(
             accessClientId = accessClientId,
             accessClientSecret = accessClientSecret,
             onDismiss = { editingStatic = null; saveError = "" },
-            onRequestDelete = { deleteTarget = DeleteTarget.StaticTarget(entry) },
+            onRequestDelete = {
+                if (entry.recurring_plan_id != null) {
+                    recurrenceScopePrompt = RecurrenceScopePrompt.ForDelete(entry)
+                } else {
+                    deleteTarget = DeleteTarget.StaticTarget(entry)
+                }
+            },
             onSave = { projectId, start, end, name, subtaskId ->
-                scope.launch {
-                    val result = withContext(Dispatchers.IO) {
-                        runCatching {
-                            ApiFactory.updatePlanEntry(
-                                serverUrl, accessClientId, accessClientSecret,
-                                id = entry.id, projectId = projectId,
-                                startTime = start.toString(), endTime = end.toString(), name = name,
-                                subtaskId = subtaskId, clearSubtask = subtaskId == null,
-                            )
-                        }
-                    }
-                    result.onSuccess {
-                        editingStatic = null
-                        saveError = ""
-                        refreshKey++
-                        offerUndo(
-                            UndoAction("План изменён") {
-                                ApiFactory.updatePlanEntry(
-                                    serverUrl, accessClientId, accessClientSecret,
-                                    id = entry.id, projectId = entry.project_id,
-                                    startTime = entry.start_time, endTime = entry.end_time,
-                                    name = entry.name ?: "",
-                                    subtaskId = entry.subtask_id, clearSubtask = entry.subtask_id == null,
-                                )
-                            },
-                        )
-                    }.onFailure { saveError = "Не удалось сохранить" }
+                if (entry.recurring_plan_id != null) {
+                    recurrenceScopePrompt = RecurrenceScopePrompt.ForSave(entry, projectId, start, end, name, subtaskId)
+                } else {
+                    saveStaticThisOnly(entry, projectId, start, end, name, subtaskId)
                 }
             },
         )
@@ -467,6 +502,103 @@ private fun DaySummaryContent(
             },
         )
     }
+
+    recurrenceScopePrompt?.let { prompt ->
+        when (prompt) {
+            is RecurrenceScopePrompt.ForSave -> RecurrenceScopeDialog(
+                title = "Сохранить изменения",
+                onDismiss = { recurrenceScopePrompt = null },
+                onThisOnly = {
+                    recurrenceScopePrompt = null
+                    saveStaticThisOnly(prompt.entry, prompt.projectId, prompt.start, prompt.end, prompt.name, prompt.subtaskId)
+                },
+                onThisAndFollowing = {
+                    recurrenceScopePrompt = null
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                ApiFactory.splitRecurrence(
+                                    serverUrl, accessClientId, accessClientSecret,
+                                    entryId = prompt.entry.id, projectId = prompt.projectId,
+                                    startTimeOfDay = ROW_TIME_FORMAT.format(prompt.start.atZone(zone).toLocalTime()),
+                                    endTimeOfDay = ROW_TIME_FORMAT.format(prompt.end.atZone(zone).toLocalTime()),
+                                    name = prompt.name.ifBlank { null },
+                                    subtaskId = prompt.subtaskId,
+                                )
+                            }
+                        }.onSuccess {
+                            editingStatic = null
+                            saveError = ""
+                            refreshKey++
+                        }.onFailure { saveError = "Не удалось сохранить" }
+                    }
+                },
+                onAll = {
+                    recurrenceScopePrompt = null
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                ApiFactory.updateRecurringPlan(
+                                    serverUrl, accessClientId, accessClientSecret,
+                                    id = prompt.entry.recurring_plan_id!!, projectId = prompt.projectId,
+                                    name = prompt.name.ifBlank { null },
+                                    startTimeOfDay = ROW_TIME_FORMAT.format(prompt.start.atZone(zone).toLocalTime()),
+                                    endTimeOfDay = ROW_TIME_FORMAT.format(prompt.end.atZone(zone).toLocalTime()),
+                                    subtaskId = prompt.subtaskId, clearSubtask = prompt.subtaskId == null,
+                                )
+                            }
+                        }.onSuccess {
+                            editingStatic = null
+                            saveError = ""
+                            refreshKey++
+                        }.onFailure { saveError = "Не удалось сохранить" }
+                    }
+                },
+            )
+
+            is RecurrenceScopePrompt.ForDelete -> RecurrenceScopeDialog(
+                title = "Удалить",
+                onDismiss = { recurrenceScopePrompt = null },
+                onThisOnly = {
+                    recurrenceScopePrompt = null
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            runCatching { ApiFactory.deletePlanEntry(serverUrl, accessClientId, accessClientSecret, prompt.entry.id) }
+                        }.onSuccess {
+                            editingStatic = null
+                            refreshKey++
+                        }.onFailure { saveError = "Не удалось удалить" }
+                    }
+                },
+                onThisAndFollowing = {
+                    recurrenceScopePrompt = null
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            runCatching { ApiFactory.stopRecurrence(serverUrl, accessClientId, accessClientSecret, prompt.entry.id) }
+                        }.onSuccess {
+                            editingStatic = null
+                            refreshKey++
+                        }.onFailure { saveError = "Не удалось удалить" }
+                    }
+                },
+                onAll = {
+                    recurrenceScopePrompt = null
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                ApiFactory.deleteRecurringPlan(
+                                    serverUrl, accessClientId, accessClientSecret, prompt.entry.recurring_plan_id!!,
+                                )
+                            }
+                        }.onSuccess {
+                            editingStatic = null
+                            refreshKey++
+                        }.onFailure { saveError = "Не удалось удалить" }
+                    }
+                },
+            )
+        }
+    }
 }
 
 @Composable
@@ -476,6 +608,7 @@ private fun SummaryRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
+    isRecurring: Boolean = false,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -492,6 +625,14 @@ private fun SummaryRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (isRecurring) {
+            Icon(
+                Icons.Filled.Repeat,
+                contentDescription = "Повторяющийся план",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
@@ -559,6 +700,7 @@ private fun StaticRowList(
                 title = title,
                 subtitle = "до ${ROW_TIME_FORMAT.format(end)}",
                 onClick = { onClick(entry) },
+                isRecurring = entry.recurring_plan_id != null,
             )
         }
     }

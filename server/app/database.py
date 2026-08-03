@@ -88,6 +88,12 @@ def ensure_schema_migrations():
                 "ALTER TABLE plan_entries ADD COLUMN subtask_id INTEGER REFERENCES subtasks(id) ON DELETE SET NULL"
             )
             conn.commit()
+        if "recurring_plan_id" not in plan_entry_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE plan_entries ADD COLUMN recurring_plan_id "
+                "INTEGER REFERENCES recurring_plans(id) ON DELETE SET NULL"
+            )
+            conn.commit()
 
         subtask_columns = {
             row[1] for row in conn.exec_driver_sql("PRAGMA table_info(subtasks)").fetchall()
