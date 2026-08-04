@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -32,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lifeos.app.data.ApiFactory
@@ -385,19 +387,37 @@ private fun RecurrenceEditor(
                             onConfigChange(current.copy(end = RecurrenceEnd.AfterCount(count)))
                         },
                     )
-                    Text("После")
-                    if (current.end is RecurrenceEnd.AfterCount) {
-                        Spacer(Modifier.width(8.dp))
-                        OutlinedTextField(
-                            value = current.end.count.toString(),
-                            onValueChange = { text ->
-                                val n = text.toIntOrNull()
-                                if (n != null && n >= 1) onConfigChange(current.copy(end = RecurrenceEnd.AfterCount(n)))
+                    Text("После N повторений")
+                }
+                // A +/- stepper for the count, on its own indented row below the radio - avoids
+                // yet another inline OutlinedTextField/keyboard interaction for what's just a
+                // small integer.
+                if (current.end is RecurrenceEnd.AfterCount) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 48.dp, top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Повторить")
+                        Spacer(Modifier.width(12.dp))
+                        TextButton(
+                            onClick = {
+                                val n = (current.end.count - 1).coerceAtLeast(1)
+                                onConfigChange(current.copy(end = RecurrenceEnd.AfterCount(n)))
                             },
-                            modifier = Modifier.width(64.dp),
-                            singleLine = true,
+                        ) { Text("−") }
+                        Text(
+                            current.end.count.toString(),
+                            modifier = Modifier.width(32.dp),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.titleMedium,
                         )
-                        Spacer(Modifier.width(8.dp))
+                        TextButton(
+                            onClick = {
+                                val n = current.end.count + 1
+                                onConfigChange(current.copy(end = RecurrenceEnd.AfterCount(n)))
+                            },
+                        ) { Text("+") }
+                        Spacer(Modifier.width(4.dp))
                         Text("раз")
                     }
                 }
@@ -495,7 +515,7 @@ fun StaticPlanFormDialog(
         onDismissRequest = onDismiss,
         title = { Text("Запланировать") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 ProjectPicker(projects, selectedProjectId, onSelect = { selectedProjectId = it })
                 Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
